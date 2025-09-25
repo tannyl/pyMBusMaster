@@ -9,8 +9,8 @@ like Home Assistant.
 from __future__ import annotations
 
 __version__ = "0.1.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__author__ = "Tanny Lund Deutsch-Lauritsen"
+__email__ = "pymbusmaster@de-la.dk"
 
 # Public API exports will be added as we implement the library
 __all__ = [
