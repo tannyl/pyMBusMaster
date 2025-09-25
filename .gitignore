@@ -21,7 +21,7 @@ build/
 *.egg-info/
 
 # Project specific
-temp/
+reference/
 
 # Claude
 .claude/
