@@ -1,3 +1,5 @@
+<!-- @import .claude/CLAUDE.local.md -->
+
 # Claude AI Assistant Instructions
 
 This file contains important instructions and context for Claude when working on the pyMBusMaster project.
