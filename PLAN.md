@@ -4,6 +4,50 @@
 
 Create a modern, async-first Python library for M-Bus (Meter-Bus) communication. It will act as master on the M-Bus and a gateway which other applications can use to get data from M-Bus devices.
 
+## M-Bus Protocol Documentation Resources
+
+### Current Standards Status
+
+**Latest Version**: EN 13757-2:2018+A1:2023 (published January 2024)
+- German DIN Version: DIN EN 13757-2:2024-12 (published December 2024)
+- Replaces previous EN 13757-2:2018-06
+- Available for purchase from national standardization bodies (BSI, DIN, NEN, etc.)
+
+### Free Documentation Resources
+
+**OMS (Open Metering System) Specification** - Our primary reference:
+- Website: https://oms-group.org/en/specification/
+- Volume 2 Primary Communication v5.0.1: Available in `reference/OMS-Spec_Vol2_Primary_v501_01.pdf`
+- Comprehensive and FREE access to M-Bus documentation
+- Covers wired M-Bus, security, encryption (AES-128), and integration
+- Modern extensions beyond basic EN 13757 standard
+
+**M-Bus.com Documentation**:
+- Website: https://m-bus.com/
+- Data Link Layer: https://m-bus.com/documentation-wired/05-data-link-layer
+- Application Layer: https://m-bus.com/documentation-wired/06-application-layer
+- Legacy MBDOC48.PDF: Available in `reference/` (reflects late 1990s spec)
+
+### Key Open Source Implementations for Reference
+
+1. **pyMeterBus** (Python): https://github.com/ganehag/pyMeterBus - **The original library that inspired this project**
+   - Synchronous design, mature codebase with good parsing logic
+   - Available in `reference/` directory for code patterns and protocol handling
+2. **libmbus** (C): https://github.com/rscada/libmbus - Well-established, production-ready
+3. **m-bus-parser** (Rust): https://github.com/maebli/m-bus-parser - Modern, with Python bindings
+4. **wmbusmeters**: https://github.com/wmbusmeters/wmbusmeters - Comprehensive tool for wired/wireless
+5. **Valley.Net.Protocols.MeterBus** (C#): https://github.com/sympthom/Valley.Net.Protocols.MeterBus - UDP/TCP/serial
+6. **jMBus** (Java): https://www.openmuc.org/m-bus/ - LGPL licensed implementation
+
+### Implementation Strategy
+
+- **Primary Reference**: Use OMS Specification v5.0.1 (already in reference/)
+- **Study existing implementations**: libmbus and m-bus-parser for patterns
+- **Compliance Target**: EN 13757-2:2018+A1:2023 requirements
+- **Frame Support**: Both short and long frame formats
+- **Baud Rates**: Standard 300-9600 minimum
+- **Modern Features**: Consider OMS security extensions for encryption
+
 ## Design Principles
 
 ### 1. Simple and Intuitive API
