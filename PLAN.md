@@ -71,11 +71,13 @@ class MBusMaster:
 
 ### Internal Architecture (Hidden from Users)
 
-The library internally uses layered architecture but users never interact with these directly:
+The library internally uses a three-layer architecture but users never interact with these directly:
 
-- **Transport Layer**: Handles serial/TCP connections, timeouts, retries
-- **Protocol Layer**: M-Bus frame parsing, validation, construction
-- **Data Layer**: Parsing meter responses into structured data
+- **Application Layer** (`master.py`): User-facing API, orchestrates operations, manages bus locking
+- **Protocol Layer** (`protocol.py`): M-Bus frame construction, parsing, validation, and data extraction
+- **Transport Layer** (`transport.py`): Handles serial/TCP connections and raw byte I/O
+
+Key architectural components:
 - **Connection Manager**: Explicit connection management with open()/close() methods
 - **Bus Lock Manager**: Uses `asyncio.Lock()` to ensure only one operation chain runs at a time
 
@@ -330,8 +332,7 @@ pyMBusMaster/
 ├── .devcontainer/          # Development container configuration
 ├── src/mbusmaster/         # Main package
 │   ├── transport.py        # Transport layer implementation
-│   ├── protocol.py         # M-Bus protocol implementation
-│   ├── frames.py           # Frame parsing and construction
+│   ├── protocol.py         # M-Bus protocol, frames, and data parsing
 │   ├── master.py           # MBusMaster main class
 │   ├── exceptions.py       # Custom exceptions
 │   └── __init__.py         # Public API exports
@@ -368,8 +369,17 @@ pyMBusMaster/
 class MBusTransport:
     """Handles connection and raw byte I/O for M-Bus communication."""
 
-    def __init__(self, url: str, baudrate: int = 2400, **kwargs):
-        """Initialize transport (does not open connection)."""
+    def __init__(self, url: str, baudrate: int = 2400, timeout_margin: float = 0.5, **kwargs):
+        """
+        Initialize transport (does not open connection).
+
+        Args:
+            url: Connection URL (serial port or socket)
+            baudrate: Baud rate for serial connections
+            timeout_margin: Extra time (seconds) to add to calculated timeouts
+                           for slow/problematic devices (default 0.5s)
+            **kwargs: Additional serial parameters
+        """
         # Store connection parameters
         # Initialize reader/writer as None
 
@@ -390,9 +400,23 @@ class MBusTransport:
         """Write raw bytes to transport."""
         # Check connected, write data, drain
 
-    async def read(self, size: int, timeout: float = 2.0) -> bytes:
-        """Read up to size bytes with timeout."""
-        # Check connected, read with timeout
+    async def read(self, size: int) -> bytes:
+        """
+        Read exactly size bytes with automatically calculated timeout.
+
+        Timeout is calculated based on:
+        - Physics: (size * 10 bits / baudrate) for transmission time
+        - Plus timeout_margin for processing delays
+        - Automatically adds extra margin for socket connections
+
+        Returns:
+            Exactly size bytes, or empty bytes on timeout
+        """
+        # Calculate timeout:
+        # transmission_time = (size * 10) / self.baudrate
+        # timeout = transmission_time + self.timeout_margin
+        # For socket URLs, add extra network margin
+        # Use reader.readexactly(size) with asyncio.wait_for(timeout)
         # Return empty bytes on timeout
 ```
 
@@ -406,9 +430,17 @@ class MBusTransport:
 
 ```python
 class MBusMaster:
-    def __init__(self, url: str, **options):
-        """Initialize master (no connection yet)."""
-        self.transport = MBusTransport(url, **options)
+    def __init__(self, url: str, timeout_margin: float = 0.5, **options):
+        """
+        Initialize master (no connection yet).
+
+        Args:
+            url: Connection URL
+            timeout_margin: Extra seconds added to calculated timeouts
+                          Increase for slow/problematic devices
+            **options: Additional options (baudrate, etc.)
+        """
+        self.transport = MBusTransport(url, timeout_margin=timeout_margin, **options)
 
     async def open(self) -> None:
         """Open M-Bus connection."""
@@ -461,6 +493,160 @@ except MBusConnectionError:
 - **Clean errors**: Separate connection errors from protocol errors
 - **Persistent connection**: Efficient for multiple operations
 - **Simple implementation**: One transport class for all connection types
+
+## Protocol Layer Design
+
+### Telegram Class Architecture
+
+The protocol layer uses a class-based approach to represent M-Bus telegrams, making the code clean, type-safe, and maintainable.
+
+#### Base Telegram Class
+```python
+class MBusTelegram:
+    """Base class for all M-Bus telegrams"""
+
+    def to_bytes(self) -> bytes:
+        """Serialize telegram to bytes for sending"""
+        raise NotImplementedError
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "MBusTelegram":
+        """Parse bytes into telegram object"""
+        raise NotImplementedError
+
+    def calculate_checksum(self, data: bytes) -> int:
+        """Calculate M-Bus checksum"""
+        return sum(data) & 0xFF
+```
+
+#### Outgoing Telegrams (Master → Slave)
+```python
+class ShortFrame(MBusTelegram):
+    """Short frame for master commands (5 bytes)"""
+
+    def __init__(self, c_field: int, address: int):
+        self.c_field = c_field
+        self.address = address
+
+    def to_bytes(self) -> bytes:
+        # Build: 0x10 | C | A | Checksum | 0x16
+
+class SndNke(ShortFrame):
+    """Reset/Initialize slave command"""
+    def __init__(self, address: int):
+        super().__init__(c_field=0x40, address=address)
+
+class ReqUD2(ShortFrame):
+    """Request user data with FCB management"""
+    def __init__(self, address: int, fcb: bool = False):
+        c_field = 0x7B if fcb else 0x5B  # Toggle FCB bit
+        super().__init__(c_field=c_field, address=address)
+```
+
+#### Incoming Telegrams (Slave → Master)
+```python
+class AckFrame(MBusTelegram):
+    """Single byte acknowledgment (0xE5)"""
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "AckFrame":
+        # Validate ACK byte
+
+class LongFrame(MBusTelegram):
+    """Variable length frame with user data"""
+
+    def __init__(self, c_field: int, address: int, ci_field: int, data: bytes):
+        self.c_field = c_field
+        self.address = address
+        self.ci_field = ci_field
+        self.data = data
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "LongFrame":
+        # Parse: 0x68 | L | L | 0x68 | C | A | CI | Data | Check | 0x16
+        # Validate structure and checksum
+        # Extract fields
+
+    def parse_data(self) -> MBusSlaveData:
+        """Parse user data into structured MBusSlaveData"""
+        # Parse DIFs, VIFs, extract measurement records
+```
+
+#### Telegram Factory
+```python
+class TelegramFactory:
+    """Factory for parsing incoming telegrams"""
+
+    @staticmethod
+    def parse(data: bytes) -> MBusTelegram:
+        """Determine telegram type and parse accordingly"""
+        # Identify by first byte: 0xE5 (ACK), 0x68 (Long), etc.
+```
+
+### Protocol Layer Integration
+```python
+class MBusProtocol:
+    """Protocol layer handling frame construction and parsing"""
+
+    def __init__(self):
+        self.fcb_state = {}  # Track FCB per address
+
+    def build_reset_frame(self, address: int) -> bytes:
+        """Build SND_NKE reset frame"""
+        return SndNke(address).to_bytes()
+
+    def build_request_frame(self, address: int) -> bytes:
+        """Build REQ_UD2 frame with FCB management"""
+        # Toggle FCB for this address
+        fcb = self.fcb_state.get(address, False)
+        frame = ReqUD2(address, fcb)
+        self.fcb_state[address] = not fcb
+        return frame.to_bytes()
+
+    def parse_response(self, data: bytes) -> MBusTelegram | MBusSlaveData | None:
+        """Parse response from slave"""
+        if not data:
+            return None
+
+        telegram = TelegramFactory.parse(data)
+
+        if isinstance(telegram, LongFrame):
+            return telegram.parse_data()  # Return structured data
+
+        return telegram  # Return ACK or other telegram types
+```
+
+### Frame Reading Strategy
+
+The protocol layer also handles intelligent frame reading from the transport:
+
+```python
+async def read_frame(self, transport: MBusTransport) -> bytes:
+    """Read complete M-Bus frame based on type"""
+    # Read first byte to determine frame type
+    first = await transport.read(1)
+
+    if first == b'\xE5':
+        return first  # ACK - single byte
+    elif first == b'\x10':
+        rest = await transport.read(4)  # Short frame - 4 more bytes
+        return first + rest
+    elif first == b'\x68':
+        # Long frame - read L-fields to determine length
+        header = await transport.read(3)
+        length = header[0]
+        rest = await transport.read(length + 2)  # data + checksum + stop
+        return first + header + rest
+```
+
+### Benefits of This Design
+
+1. **Type Safety**: Each telegram type is a distinct class
+2. **Separation of Concerns**: Construction vs parsing clearly separated
+3. **FCB Management**: Automatic Frame Count Bit tracking
+4. **Extensibility**: Easy to add new telegram types or commands
+5. **Testability**: Each class can be unit tested independently
+6. **Clean API**: Consistent `to_bytes()`/`from_bytes()` pattern
 
 ## Development Phases
 

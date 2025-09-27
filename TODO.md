@@ -2,71 +2,74 @@
 
 ## 🚧 Current Phase: Project Setup
 
-### ✅ Completed Tasks
-- [x] Create project vision and architecture plan (PLAN.md)
-- [x] Create development roadmap (TODO.md)
-
-### 🔄 In Progress
-- [ ] Update devcontainer for async development
-- [ ] Create GitHub repository for mbus-async
-
 ### 📋 Immediate Tasks (Week 1)
 
 #### Project Setup
 - [ ] **Update devcontainer configuration**
-  - [ ] Add async development dependencies (pyserial-asyncio, pydantic)
-  - [ ] Add development tools (ruff, mypy, pytest-asyncio)
-  - [ ] Update Python version requirements
-  - [ ] Add serial device simulation tools for testing
+  - [x] Add async development dependencies (pyserial-asyncio-fast, pydantic)
+  - [x] Add development tools (ruff, mypy, pytest-asyncio)
+  - [x] Update Python version requirements
+  - [x] Add M-Bus device testing capability (EthMBus-XL gateway: ethmbus.de-la.dk:10001)
 
 - [ ] **Create GitHub repository**
-  - [ ] Initialize new repository: `pyMBusMaster`
+  - [x] Initialize new repository: `pyMBusMaster`
   - [ ] Set up repository settings (description, topics, license)
   - [ ] Configure branch protection and merge settings
   - [ ] Add repository templates (issues, PR, etc.)
 
 - [ ] **Initialize project structure**
-  - [ ] Create modern Python project layout with `src/` structure
-  - [ ] Setup `pyproject.toml` with project metadata and dependencies
-  - [ ] Create basic package structure (`src/mbusmaster/`)
-  - [ ] Add initial `__init__.py` and version management
-  - [ ] Setup testing structure (`tests/unit/`, `tests/integration/`)
+  - [x] Create modern Python project layout with `src/` structure
+  - [x] Setup `pyproject.toml` with project metadata and dependencies
+  - [x] Create basic package structure (`src/mbusmaster/`)
+  - [x] Add initial `__init__.py` and version management
+  - [x] Setup testing structure (`tests/unit/`, `tests/integration/`)
+  - [ ] Create file-based module structure: `transport.py`, `protocol.py`, `master.py` (exceptions.py ✓)
 
 - [ ] **Documentation setup**
-  - [ ] Create comprehensive README.md
-  - [ ] Setup documentation structure (`docs/`)
+  - [x] Create comprehensive README.md
+  - [x] Setup documentation structure (`docs/`)
   - [ ] Create contribution guidelines (CONTRIBUTING.md)
   - [ ] Setup changelog format (CHANGELOG.md)
 
 ## 📅 Development Phases
 
-### Phase 1: Foundation (Weeks 1-2)
-**Goal**: Basic project infrastructure and core transport layer
+### Phase 1: Transport Layer (Weeks 1-2)
+**Goal**: Solid foundation with connection management and raw I/O
 
 #### Transport Layer Implementation
-- [ ] **Async serial transport**
-  - [ ] Create `MBusTransport` class with pyserial-asyncio
-  - [ ] Implement connection lifecycle management
-  - [ ] Add timeout and error handling
-  - [ ] Create transport configuration options
+- [ ] **MBusTransport class**
+  - [ ] Implement `__init__()` with URL parsing and timeout_margin
+  - [ ] Add `open()` and `close()` methods using pyserial-asyncio-fast
+  - [ ] Implement `is_connected()` status check
+  - [ ] Add `write()` method for sending bytes
+  - [ ] Implement `read()` with smart timeout calculation
+  - [ ] Add connection asyncio locks
 
-- [ ] **Connection management**
-  - [ ] Implement `MBusConnection` context manager
-  - [ ] Add connection pooling capabilities
-  - [ ] Implement reconnection logic
-  - [ ] Add connection health monitoring
-
-#### Basic Frame Handling
-- [ ] **Frame parsing foundation**
-  - [ ] Extract and adapt frame parsing from pyMeterBus
-  - [ ] Create base `MBusFrame` class with type hints
-  - [ ] Implement frame validation
-  - [ ] Add frame serialization/deserialization
+- [ ] **Smart timeout calculation**
+  - [ ] Calculate transmission time based on baudrate
+  - [ ] Add configurable timeout_margin parameter
+  - [ ] Handle different connection types (serial vs socket)
+  - [ ] Implement per-operation timeout logic
 
 - [ ] **Exception handling**
-  - [ ] Define custom exception hierarchy
-  - [ ] Add error codes and descriptions
-  - [ ] Implement error recovery patterns
+  - [ ] Create MBusError base class
+  - [ ] Add MBusConnectionError for transport issues
+  - [ ] Add MBusTimeoutError for timeout scenarios
+  - [ ] Add MBusProtocolError for protocol issues
+  - [ ] Implement proper error propagation
+
+#### Testing Transport Layer
+- [ ] **Unit tests**
+  - [ ] Test connection lifecycle (open/close)
+  - [ ] Test timeout calculation logic
+  - [ ] Test error handling scenarios
+  - [ ] Mock serial connections for testing
+
+- [ ] **Integration tests**
+  - [ ] Test with real serial loopback
+  - [ ] Test with TCP socket connections (EthMBus-XL: ethmbus.de-la.dk:10001)
+  - [ ] Test with real M-Bus devices (3 meters available via EthMBus-XL)
+  - [ ] Verify timeout behavior with slow connections
 
 #### Testing Infrastructure
 - [ ] **Test setup**
@@ -81,69 +84,116 @@
   - [ ] Setup test coverage reporting
   - [ ] Add multiple Python version testing
 
-### Phase 2: Protocol Implementation (Weeks 3-4)
-**Goal**: Complete M-Bus protocol implementation
+### Phase 2: Protocol Layer (Weeks 3-4)
+**Goal**: Complete M-Bus protocol with class-based telegram handling
 
-#### Core Protocol Features
-- [ ] **Basic operations**
-  - [ ] Implement ping functionality
-  - [ ] Add data request operations
-  - [ ] Create address management
-  - [ ] Add frame acknowledgment handling
+#### Telegram Class Implementation
+- [ ] **Base telegram classes**
+  - [ ] Implement MBusTelegram base class
+  - [ ] Add calculate_checksum() method
+  - [ ] Create to_bytes() and from_bytes() interface
+  - [ ] Add proper error handling
 
-- [ ] **Device discovery**
-  - [ ] Implement primary address scanning
-  - [ ] Add secondary address scanning
-  - [ ] Create device identification
-  - [ ] Add discovery result caching
+- [ ] **Outgoing telegrams (Master → Slave)**
+  - [ ] Implement ShortFrame base class
+  - [ ] Create SndNke class for reset commands
+  - [ ] Create ReqUD2 class with FCB management
+  - [ ] Add ReqUD1 class for special cases
 
-- [ ] **Advanced protocol features**
-  - [ ] Multi-frame response handling
-  - [ ] Application layer protocol
-  - [ ] Device configuration operations
-  - [ ] Alarm and error handling
+- [ ] **Incoming telegrams (Slave → Master)**
+  - [ ] Implement AckFrame class for single-byte ACK
+  - [ ] Create LongFrame class for data responses
+  - [ ] Add ControlFrame class for 9-byte responses
+  - [ ] Implement frame validation and checksum verification
 
-#### Data Processing
-- [ ] **Data parsing**
-  - [ ] Implement variable data record parsing
-  - [ ] Add unit conversion and scaling
-  - [ ] Create data validation
-  - [ ] Add timestamp handling
+#### Protocol Layer Integration
+- [ ] **MBusProtocol class**
+  - [ ] Implement FCB state management per address
+  - [ ] Add build_reset_frame() method
+  - [ ] Add build_request_frame() with FCB toggle
+  - [ ] Create parse_response() for incoming data
 
-- [ ] **Device information**
-  - [ ] Parse manufacturer information
-  - [ ] Extract device identification
-  - [ ] Handle device capabilities
-  - [ ] Create device metadata structures
+- [ ] **Frame reading strategy**
+  - [ ] Implement intelligent frame type detection
+  - [ ] Add read_frame() method using transport layer
+  - [ ] Handle different frame lengths correctly
+  - [ ] Add timeout handling for incomplete frames
 
-### Phase 3: Device Abstraction (Weeks 5-6)
-**Goal**: High-level device API and monitoring
+#### Data Parsing Implementation
+- [ ] **Variable data structure parsing**
+  - [ ] Parse DIF (Data Information Field)
+  - [ ] Parse VIF (Value Information Field)
+  - [ ] Extract measurement values with proper scaling
+  - [ ] Create MBusSlaveRecord objects
 
-#### Device API
-- [ ] **MBusDevice class**
-  - [ ] Create device abstraction layer
-  - [ ] Implement data reading methods
-  - [ ] Add device information retrieval
-  - [ ] Create device state management
+- [ ] **MBusSlaveData construction**
+  - [ ] Parse device identification fields
+  - [ ] Extract manufacturer information
+  - [ ] Build list of measurement records
+  - [ ] Add timestamp and metadata
 
-- [ ] **Monitoring capabilities**
-  - [ ] Implement continuous monitoring
-  - [ ] Add data change notifications
-  - [ ] Create monitoring task management
-  - [ ] Add monitoring configuration options
+#### Testing Protocol Layer
+- [ ] **Unit tests for telegram classes**
+  - [ ] Test to_bytes() serialization
+  - [ ] Test from_bytes() parsing with valid data
+  - [ ] Test checksum calculation and validation
+  - [ ] Test error handling with invalid data
 
-#### Data Models
-- [ ] **Pydantic models**
-  - [ ] Create device data models
-  - [ ] Add data validation and serialization
-  - [ ] Implement unit handling
-  - [ ] Add data export formats (JSON, dict)
+- [ ] **Integration tests with real data**
+  - [ ] Test with captured M-Bus telegrams
+  - [ ] Verify frame reading with different device types
+  - [ ] Test FCB management across multiple requests
+  - [ ] Validate data parsing accuracy
 
-- [ ] **Device registry**
-  - [ ] Create device type registry
-  - [ ] Add device capability detection
-  - [ ] Implement device-specific handlers
-  - [ ] Add custom device extensions
+### Phase 3: Application Layer (Weeks 5-6)
+**Goal**: User-facing MBusMaster API and device operations
+
+#### MBusMaster Class Implementation
+- [ ] **Core master functionality**
+  - [ ] Implement MBusMaster __init__() with transport and protocol setup
+  - [ ] Add open() and close() connection management
+  - [ ] Implement is_connected() status check
+  - [ ] Add context manager support (__aenter__, __aexit__)
+  - [ ] Add bus_lock for safe concurrent operations
+
+- [ ] **Device communication methods**
+  - [ ] Implement ping_addresses() for device availability checking
+  - [ ] Add query_addresses() for data collection
+  - [ ] Create scan_addresses() for device discovery
+  - [ ] Add timeout_margin parameter handling
+
+- [ ] **Error handling and recovery**
+  - [ ] Proper exception propagation from lower layers
+  - [ ] Add retry logic for intermittent failures
+  - [ ] Implement graceful handling of non-responsive devices
+  - [ ] Add logging for debugging and monitoring
+
+#### Integration and Testing
+- [ ] **End-to-end functionality**
+  - [ ] Test complete ping → acknowledge flow
+  - [ ] Test complete reset → request → data flow
+  - [ ] Verify multi-device operations work correctly
+  - [ ] Test concurrent operations with bus locking
+
+- [ ] **Real device testing**
+  - [ ] Test with actual M-Bus devices (3 meters via EthMBus-XL gateway)
+  - [ ] Verify data accuracy against known values
+  - [ ] Test with different device types and manufacturers
+  - [ ] Performance testing with multiple devices
+  - [ ] Test socket:// URL format with ethmbus.de-la.dk:10001
+
+#### Documentation and Examples
+- [ ] **Usage examples**
+  - [ ] Basic ping and query examples
+  - [ ] Context manager usage patterns
+  - [ ] Error handling examples
+  - [ ] Multi-device monitoring example
+
+- [ ] **API documentation**
+  - [ ] Comprehensive docstrings for all public methods
+  - [ ] Type hints for all parameters and return values
+  - [ ] Clear examples in docstrings
+  - [ ] Error condition documentation
 
 ### Phase 4: Integration Support (Weeks 7-8)
 **Goal**: Framework integration and examples
@@ -191,8 +241,7 @@
 ### Performance
 - [ ] Profile async operations
 - [ ] Optimize frame parsing
-- [ ] Add connection pooling
-- [ ] Implement caching strategies
+- [ ] Implement caching strategies for device information
 
 ## 🚀 Future Features (Beyond v1.0)
 
@@ -202,32 +251,15 @@
   - [ ] Implement encryption handling
   - [ ] Add radio communication layer
 
-- [ ] **Additional transports**
-  - [ ] TCP/IP transport
-  - [ ] USB transport
-  - [ ] Bluetooth transport
-
 ### Advanced Features
 - [ ] **Protocol analysis tools**
   - [ ] Frame analyzer and debugger
   - [ ] Protocol trace recording
-  - [ ] Performance analysis tools
-
-- [ ] **Device management**
-  - [ ] Device configuration tools
-  - [ ] Firmware update support
-  - [ ] Device diagnostics
 
 ### User Interface
 - [ ] **Command-line tools**
   - [ ] Device discovery CLI
   - [ ] Data reading CLI
-  - [ ] Configuration CLI
-
-- [ ] **Web interface**
-  - [ ] Device management dashboard
-  - [ ] Real-time monitoring
-  - [ ] Data visualization
 
 ## 📊 Success Metrics
 
@@ -235,10 +267,8 @@
 - [ ] **Test coverage > 90%**
 - [ ] **All functions have type hints**
 - [ ] **Documentation coverage > 80%**
-- [ ] **Performance benchmarks established**
 
 ### User Experience Metrics
-- [ ] **Installation time < 1 minute**
 - [ ] **Basic usage example < 10 lines of code**
 - [ ] **Complete integration example < 50 lines**
 - [ ] **Clear error messages for common issues**
@@ -247,33 +277,6 @@
 - [ ] **GitHub repository setup**
 - [ ] **PyPI package published**
 - [ ] **Documentation site deployed**
-- [ ] **First community contribution**
-
-## 🏷️ Release Milestones
-
-### v0.1.0 - Foundation Release
-- [ ] Basic transport and frame parsing
-- [ ] Simple device communication
-- [ ] Core test suite
-- [ ] Basic documentation
-
-### v0.2.0 - Protocol Complete
-- [ ] Full M-Bus protocol implementation
-- [ ] Device discovery
-- [ ] Error handling and recovery
-- [ ] Comprehensive testing
-
-### v0.3.0 - High-Level API
-- [ ] Device abstraction layer
-- [ ] Monitoring capabilities
-- [ ] Data validation
-- [ ] Integration examples
-
-### v1.0.0 - Production Ready
-- [ ] Stable API
-- [ ] Complete documentation
-- [ ] Framework integrations
-- [ ] Performance optimizations
 
 ---
 
