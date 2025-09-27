@@ -362,6 +362,19 @@ pyMBusMaster/
 - **Single transport class**: Leverages `pyserial-asyncio-fast` for all connection types
 - **Clean separation**: Transport handles connections and raw I/O, protocol layer handles M-Bus specifics
 
+### M-Bus Protocol Timing Requirements
+
+According to EN 13757-2 standard, M-Bus has specific timing requirements for fault handling:
+
+- **Response timeout**: 330 bit periods + 50ms
+  - Example at 2400 baud: (330/2400) + 0.050 = 0.188 seconds
+  - Example at 9600 baud: (330/9600) + 0.050 = 0.084 seconds
+- **Idle time after failures**: Minimum 33 bit periods
+  - Example at 2400 baud: 33/2400 = 0.014 seconds (14ms)
+- **Retry mechanism**: Up to 3 transmission attempts (original + 2 retries)
+
+These timing requirements must be considered in both transport and protocol layers.
+
 ### Transport Layer Architecture
 
 #### MBusTransport Class
@@ -405,16 +418,20 @@ class MBusTransport:
         Read exactly size bytes with automatically calculated timeout.
 
         Timeout is calculated based on:
-        - Physics: (size * 10 bits / baudrate) for transmission time
-        - Plus timeout_margin for processing delays
-        - Automatically adds extra margin for socket connections
+        - Transmission time: (size * 10 bits / baudrate)
+        - M-Bus response timeout: (330 bit periods / baudrate) + 50ms
+        - Plus configurable timeout_margin for problematic devices
+        - Additional margin for socket connections
 
         Returns:
             Exactly size bytes, or empty bytes on timeout
+
+        Note: Retries are handled at protocol layer, not here.
         """
         # Calculate timeout:
         # transmission_time = (size * 10) / self.baudrate
-        # timeout = transmission_time + self.timeout_margin
+        # response_timeout = (330 / self.baudrate) + 0.050  # M-Bus standard
+        # timeout = transmission_time + response_timeout + self.timeout_margin
         # For socket URLs, add extra network margin
         # Use reader.readexactly(size) with asyncio.wait_for(timeout)
         # Return empty bytes on timeout
@@ -583,10 +600,48 @@ class TelegramFactory:
         # Identify by first byte: 0xE5 (ACK), 0x68 (Long), etc.
 ```
 
+### Fault Handling and Retries
+
+The protocol layer implements M-Bus standard fault handling according to EN 13757-2:
+
+#### Telegram Validation
+- **Character level**: Check Start/Parity/Stop bits
+- **Frame level**: Verify Start/Checksum/Stop characters
+- **Long frames**: Validate second start byte, L-field matching, character count
+
+#### Retry Mechanism
+```python
+class MBusProtocol:
+    MAX_RETRY_ATTEMPTS = 3  # Original + 2 retries
+    IDLE_TIME_BITS = 33     # Bit periods between failures
+
+    async def send_with_retry(self, frame: bytes, address: int) -> bytes | None:
+        """Send frame with up to 3 attempts and proper idle times"""
+        for attempt in range(self.MAX_RETRY_ATTEMPTS):
+            response = await self.send_and_receive(frame)
+            if response and self.validate_response(response):
+                return response
+
+            if attempt < self.MAX_RETRY_ATTEMPTS - 1:
+                # Wait idle time before retry (33 bit periods)
+                idle_time = self.IDLE_TIME_BITS / self.baudrate
+                await asyncio.sleep(idle_time)
+
+        # After 3 failures, try SND_NKE before giving up
+        await self.send_nke(address)
+        return None
+```
+
 ### Protocol Layer Integration
 ```python
 class MBusProtocol:
     """Protocol layer handling frame construction and parsing"""
+
+    # M-Bus timing constants (EN 13757-2)
+    RESPONSE_TIMEOUT_BITS = 330    # Bit periods for response timeout
+    RESPONSE_TIMEOUT_FIXED = 0.050 # Additional 50ms for response timeout
+    IDLE_TIME_BITS = 33            # Bit periods between failures
+    MAX_RETRY_ATTEMPTS = 3         # Original transmission + 2 retries
 
     def __init__(self):
         self.fcb_state = {}  # Track FCB per address
