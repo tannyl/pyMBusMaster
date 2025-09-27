@@ -335,13 +335,122 @@ pyMBusMaster/
 └── pyproject.toml          # Project configuration
 ```
 
+## Transport Layer Design
+
+### Connection Management Philosophy
+- **Explicit lifecycle**: User controls connection with `open()` and `close()` methods
+- **Early validation**: Connection tested at `open()`, not during first data operation
+- **Single transport class**: Leverages `pyserial-asyncio-fast` for all connection types
+- **Clean separation**: Transport handles connections and raw I/O, protocol layer handles M-Bus specifics
+
+### Transport Layer Architecture
+
+#### MBusTransport Class
+```python
+class MBusTransport:
+    """Handles connection and raw byte I/O for M-Bus communication."""
+
+    def __init__(self, url: str, baudrate: int = 2400, **kwargs):
+        """Initialize transport (does not open connection)."""
+        # Store connection parameters
+        # Initialize reader/writer as None
+
+    async def open(self) -> None:
+        """Open connection. Raises MBusConnectionError on failure."""
+        # Use serial_asyncio.open_serial_connection()
+        # Set connected flag
+
+    async def close(self) -> None:
+        """Close connection (idempotent)."""
+        # Close writer, wait for close
+        # Clear reader/writer references
+
+    def is_connected(self) -> bool:
+        """Check connection status."""
+
+    async def write(self, data: bytes) -> None:
+        """Write raw bytes to transport."""
+        # Check connected, write data, drain
+
+    async def read(self, size: int, timeout: float = 2.0) -> bytes:
+        """Read up to size bytes with timeout."""
+        # Check connected, read with timeout
+        # Return empty bytes on timeout
+```
+
+#### Connection URL Support
+- **Serial ports**: `/dev/ttyUSB0`, `COM3`
+- **TCP sockets**: `socket://192.168.1.100:10001`
+- **RFC2217**: `rfc2217://192.168.1.100:10001`
+- All handled transparently by `pyserial-asyncio-fast`
+
+### MBusMaster Integration
+
+```python
+class MBusMaster:
+    def __init__(self, url: str, **options):
+        """Initialize master (no connection yet)."""
+        self.transport = MBusTransport(url, **options)
+
+    async def open(self) -> None:
+        """Open M-Bus connection."""
+        await self.transport.open()
+
+    async def close(self) -> None:
+        """Close M-Bus connection."""
+        await self.transport.close()
+
+    # Context manager support
+    async def __aenter__(self):
+        await self.open()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+```
+
+### Usage Patterns
+
+#### Explicit Management
+```python
+master = MBusMaster("/dev/ttyUSB0")
+await master.open()  # Test connection early
+# ... use master ...
+await master.close()
+```
+
+#### Context Manager
+```python
+async with MBusMaster("/dev/ttyUSB0") as master:
+    # Connection opened automatically
+    # ... use master ...
+# Connection closed automatically
+```
+
+#### Connection Testing
+```python
+master = MBusMaster("/dev/ttyUSB0")
+try:
+    await master.open()
+    print("Connected!")
+except MBusConnectionError:
+    print("Connection failed")
+```
+
+### Benefits
+- **Fail early**: Connection problems detected immediately at `open()`
+- **Resource control**: User decides when to allocate/free serial port
+- **Clean errors**: Separate connection errors from protocol errors
+- **Persistent connection**: Efficient for multiple operations
+- **Simple implementation**: One transport class for all connection types
+
 ## Development Phases
 
 ### Phase 1: Foundation (Weeks 1-2)
 - Project setup and structure
-- Basic async transport layer
+- Basic async transport layer with explicit connection management
 - Core frame parsing (adapted from pyMeterBus)
-- Connection management
+- Connection management implementation
 - Basic test suite
 
 ### Phase 2: Protocol Implementation (Weeks 3-4)
