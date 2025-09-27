@@ -21,7 +21,7 @@ Create a modern, async-first Python library for M-Bus (Meter-Bus) communication.
 ### 3. Hidden Complexity
 - **Internal Architecture**: Complex protocol handling happens behind the scenes
 - **Smart Defaults**: Reasonable defaults for all configuration
-- **Automatic Management**: Connection, timeouts, retries handled automatically
+- **Explicit Management**: Connection lifecycle controlled by user with open()/close()
 - **Clean API Surface**: Users only see what they need
 
 ### 4. Bus Safety and Concurrency
@@ -53,6 +53,12 @@ class MBusMaster:
         - TCP: "socket://192.168.1.100:10001"
         """
 
+    async def open(self) -> None:
+        """Open connection to M-Bus"""
+
+    async def close(self) -> None:
+        """Close connection to M-Bus"""
+
     async def ping_addresses(self, addresses: list[int]) -> dict[int, bool]:
         """Check if meters at addresses respond"""
 
@@ -70,7 +76,7 @@ The library internally uses layered architecture but users never interact with t
 - **Transport Layer**: Handles serial/TCP connections, timeouts, retries
 - **Protocol Layer**: M-Bus frame parsing, validation, construction
 - **Data Layer**: Parsing meter responses into structured data
-- **Connection Manager**: Automatic connection handling, reconnection logic
+- **Connection Manager**: Explicit connection management with open()/close() methods
 - **Bus Lock Manager**: Uses `asyncio.Lock()` to ensure only one operation chain runs at a time
 
 #### Bus Safety Implementation
@@ -105,7 +111,6 @@ This ensures that even if multiple sensors in Home Assistant call `query_address
 ```python
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
 from enum import Enum
 
 class MBusSlaveInfo(BaseModel):
@@ -125,8 +130,8 @@ class MBusSlaveInfo(BaseModel):
     access_number: int          # Counter incremented with each telegram
 
     # Optional extended info
-    firmware_version: Optional[str] = None
-    hardware_version: Optional[str] = None
+    firmware_version: str | None = None
+    hardware_version: str | None = None
 
 
 class MBusRecordType(str, Enum):
@@ -175,7 +180,7 @@ class MBusSlaveRecord(BaseModel):
     device_unit: int = 0         # Device unit number (for multi-channel devices)
 
     # Optional extended info
-    timestamp: Optional[datetime] = None  # If record has specific timestamp
+    timestamp: datetime | None = None  # If record has specific timestamp
 
 
 class MBusSlaveData(MBusSlaveInfo):
@@ -191,7 +196,7 @@ class MBusSlaveData(MBusSlaveInfo):
     # All data records from the device
     records: list[MBusSlaveRecord]
 
-    def get_record(self, type: MBusRecordType, storage: int = 0) -> Optional[MBusSlaveRecord]:
+    def get_record(self, type: MBusRecordType, storage: int = 0) -> MBusSlaveRecord | None:
         """Helper to find specific record by type and storage number"""
         for record in self.records:
             if record.type == type and record.storage_number == storage:
@@ -252,6 +257,7 @@ from mbusmaster import MBusMaster
 async def main():
     # Connect to M-Bus gateway via TCP
     master = MBusMaster("socket://ethmbus.de-la.dk:10001")
+    await master.open()  # Explicit connection
 
     # Ping single meter
     results = await master.ping_addresses([5])
@@ -266,27 +272,39 @@ async def main():
     # Get meter data
     data_dict = await master.query_addresses([5])
     data = data_dict[5]
-    print(f"Energy: {data.energy_kwh} kWh")
-    print(f"Power: {data.power_w} W")
+    if data:
+        # Use the flexible record structure
+        energy = data.get_record(MBusRecordType.ENERGY)
+        if energy:
+            print(f"Energy: {energy.value} {energy.unit}")
+        power = data.get_record(MBusRecordType.POWER)
+        if power:
+            print(f"Power: {power.value} {power.unit}")
 
     # Query multiple meters efficiently
     all_data = await master.query_addresses([1, 5, 10])
     for addr, data in all_data.items():
-        print(f"Meter {addr}: {data.energy_kwh} kWh")
+        if data:
+            energy = data.get_record(MBusRecordType.ENERGY)
+            if energy:
+                print(f"Meter {addr}: {energy.value} {energy.unit}")
 
     # Scan for all meters on specific addresses
     scan_results = await master.scan_addresses(range(1, 251))
     found_meters = [addr for addr, info in scan_results.items() if info is not None]
     print(f"Found meters at: {found_meters}")
 
-# Serial connection example
-async def serial_example():
-    master = MBusMaster("/dev/ttyUSB0", baudrate=2400)
+    # Close connection when done
+    await master.close()
 
-    # Same simple API works for serial
-    results = await master.query_addresses([1, 2, 3])
-    for addr, data in results.items():
-        print(f"Meter {addr}: {data}")
+# Serial connection example with context manager
+async def serial_example():
+    async with MBusMaster("/dev/ttyUSB0", baudrate=2400) as master:
+        # Connection opened automatically
+        results = await master.query_addresses([1, 2, 3])
+        for addr, data in results.items():
+            print(f"Meter {addr}: {data}")
+        # Connection closed automatically
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -311,10 +329,10 @@ if __name__ == "__main__":
 pyMBusMaster/
 ├── .devcontainer/          # Development container configuration
 ├── src/mbusmaster/         # Main package
-│   ├── transport/          # Serial transport layer
-│   ├── protocol/           # M-Bus protocol implementation
-│   ├── devices/            # Device abstractions
-│   ├── frames/             # Frame parsing and construction
+│   ├── transport.py        # Transport layer implementation
+│   ├── protocol.py         # M-Bus protocol implementation
+│   ├── frames.py           # Frame parsing and construction
+│   ├── master.py           # MBusMaster main class
 │   ├── exceptions.py       # Custom exceptions
 │   └── __init__.py         # Public API exports
 ├── tests/                  # Test suite
