@@ -37,13 +37,12 @@
 **Goal**: Solid foundation with connection management and raw I/O
 
 #### 1.1: Transport Layer Implementation
-- [ ] **1.1.1: MBusTransport class**
-  - [ ] Implement `__init__()` with URL parsing and timeout_margin
-  - [ ] Add `open()` and `close()` methods using pyserial-asyncio-fast
-  - [ ] Implement `is_connected()` status check
-  - [ ] Add `write()` method for sending bytes
-  - [ ] Implement `read()` with smart timeout calculation
-  - [ ] Add connection asyncio locks
+- [x] **1.1.1: MBusTransport class**
+  - [x] Implement `__init__()` with URL parsing and timeout_margin
+  - [x] Add `open()` and `close()` methods using pyserial-asyncio-fast
+  - [x] Implement `is_connected()` status check
+  - [x] Add `write()` method for sending bytes
+  - [x] Implement `read()` with smart timeout calculation
 
 - [ ] **1.1.2: Smart timeout calculation**
   - [ ] Calculate transmission time based on baudrate
