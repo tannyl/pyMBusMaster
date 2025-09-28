@@ -58,17 +58,20 @@
   - [x] Implement proper error propagation (transport uses MBusConnectionError)
 
 #### 1.2: Testing Transport Layer
-- [ ] **1.2.1: Unit tests**
-  - [ ] Test connection lifecycle (open/close)
-  - [ ] Test timeout calculation logic
-  - [ ] Test error handling scenarios
-  - [ ] Mock serial connections for testing
+- [x] **1.2.1: Unit tests**
+  - [x] Test connection lifecycle (open/close)
+  - [x] Test timeout calculation logic
+  - [x] Test error handling scenarios
+  - [x] Mock serial connections for testing
 
 - [ ] **1.2.2: Integration tests**
-  - [ ] Test with real serial loopback
-  - [ ] Test with TCP socket connections (EthMBus-XL: ethmbus.de-la.dk:10001)
-  - [ ] Test with real M-Bus devices (3 meters available via EthMBus-XL)
-  - [ ] Verify timeout behavior with slow connections
+  - [ ] Test with mock TCP server (simulate M-Bus gateway)
+  - [ ] Test with virtual serial ports (pty pairs on Linux/Mac)
+  - [ ] Verify timeout behavior with simulated delays
+  - [ ] Test connection recovery after network interruption
+
+  Note: Manual testing against ethmbus.de-la.dk:10001 should be done during
+  development but not included in automated test suite.
 
 #### 1.3: Testing Infrastructure
 - [ ] **1.3.1: Test setup**
