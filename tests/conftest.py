@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -38,7 +39,7 @@ def mock_open_serial_connection(mock_serial_connection: tuple[AsyncMock, AsyncMo
 
 
 @pytest.fixture
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+def event_loop() -> Generator[asyncio.AbstractEventLoop]:
     """Create an event loop for async tests."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

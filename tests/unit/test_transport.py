@@ -21,7 +21,6 @@ class TestMBusTransportInit:
 
         assert transport.url == "/dev/ttyUSB0"
         assert transport.transmission_multiplier == 1.2
-        assert transport.baudrate == 2400
         assert transport.serial_kwargs["baudrate"] == 2400
         assert transport.serial_kwargs["bytesize"] == 8
         assert transport.serial_kwargs["parity"] == "E"
@@ -40,7 +39,6 @@ class TestMBusTransportInit:
 
         assert transport.url == "socket://localhost:5000"
         assert transport.transmission_multiplier == 1.5
-        assert transport.baudrate == 9600
         assert transport.serial_kwargs["baudrate"] == 9600
         assert transport.serial_kwargs["parity"] == "N"
         assert transport.serial_kwargs["stopbits"] == 2
@@ -143,6 +141,76 @@ class TestMBusTransportConnection:
             assert not transport.is_connected()
 
 
+class TestMBusTransportTransmissionTime:
+    """Test transmission time calculation."""
+
+    def test_transmission_time_mbus_default(self) -> None:
+        """Test transmission time with M-Bus default settings (8E1)."""
+        transport = MBusTransport("/dev/ttyUSB0", baudrate=2400)  # 8E1 default
+
+        # M-Bus 8E1: 1 start + 8 data + 1 parity + 1 stop = 11 bits per byte
+        time_1_byte = transport.calculate_transmission_time(1)
+        expected_1_byte = 11 / 2400  # 0.004583 seconds
+
+        assert abs(time_1_byte - expected_1_byte) < 0.000001
+
+    def test_transmission_time_different_configurations(self) -> None:
+        """Test transmission time with different serial configurations."""
+        test_cases = [
+            # (bytesize, parity, stopbits, expected_bits_per_byte)
+            (8, "E", 1, 11),    # M-Bus standard: 1+8+1+1 = 11
+            (8, "N", 1, 10),    # Common: 1+8+0+1 = 10
+            (7, "E", 1, 10),    # 1+7+1+1 = 10
+            (8, "O", 2, 12),    # 1+8+1+2 = 12
+            (8, "N", 1.5, 10.5), # 1+8+0+1.5 = 10.5
+        ]
+
+        for bytesize, parity, stopbits, expected_bits in test_cases:
+            transport = MBusTransport(
+                "/dev/ttyUSB0",
+                baudrate=2400,
+                bytesize=bytesize,
+                parity=parity,
+                stopbits=stopbits
+            )
+
+            time_1_byte = transport.calculate_transmission_time(1)
+            expected_time = expected_bits / 2400
+
+            assert abs(time_1_byte - expected_time) < 0.000001, \
+                f"Failed for {bytesize}{parity}{stopbits}: got {time_1_byte}, expected {expected_time}"
+
+    def test_transmission_time_scaling(self) -> None:
+        """Test that transmission time scales correctly with size."""
+        transport = MBusTransport("/dev/ttyUSB0", baudrate=2400)  # 8E1 = 11 bits
+
+        time_1_byte = transport.calculate_transmission_time(1)
+        time_10_bytes = transport.calculate_transmission_time(10)
+        time_100_bytes = transport.calculate_transmission_time(100)
+
+        # Should scale linearly
+        assert abs(time_10_bytes - (time_1_byte * 10)) < 0.000001
+        assert abs(time_100_bytes - (time_1_byte * 100)) < 0.000001
+
+    def test_transmission_time_different_baudrates(self) -> None:
+        """Test transmission time with different baudrates."""
+        baudrates = [2400, 4800, 9600, 19200]
+
+        for baudrate in baudrates:
+            transport = MBusTransport("/dev/ttyUSB0", baudrate=baudrate)
+            time_1_byte = transport.calculate_transmission_time(1)
+            expected_time = 11 / baudrate  # 8E1 = 11 bits
+
+            assert abs(time_1_byte - expected_time) < 0.000001
+
+    def test_transmission_time_zero_size(self) -> None:
+        """Test transmission time with zero size."""
+        transport = MBusTransport("/dev/ttyUSB0", baudrate=2400)
+        time_zero = transport.calculate_transmission_time(0)
+
+        assert time_zero == 0.0
+
+
 class TestMBusTransportTimeouts:
     """Test timeout calculation logic."""
 
@@ -150,28 +218,36 @@ class TestMBusTransportTimeouts:
         """Test basic timeout calculation."""
         transport = MBusTransport("/dev/ttyUSB0", baudrate=2400, transmission_multiplier=1.2)
 
-        # Calculate manually
+        # Calculate manually using correct M-Bus bit count (8E1 = 11 bits)
         size = 10
         protocol_timeout = 0.5
-        transmission_time = (size * 10) / 2400  # 0.041667
-        expected_timeout = protocol_timeout + (transmission_time * 1.2)  # 0.55
+        transmission_time = transport.calculate_transmission_time(size)  # 11 bits per byte
+        expected_timeout = protocol_timeout + (transmission_time * 1.2)
 
-        # Test the calculation from the code
-        calculated_timeout = protocol_timeout + ((size * 10) / transport.baudrate * transport.transmission_multiplier)
+        # Test the calculation from the read() method
+        calculated_timeout = protocol_timeout + (transport.calculate_transmission_time(size) * transport.transmission_multiplier)
 
         assert abs(calculated_timeout - expected_timeout) < 0.000001
 
     def test_timeout_calculation_different_baudrates(self) -> None:
         """Test timeout calculation with different baudrates."""
         test_cases = [
-            (2400, 1.0, 10, 0.5, 0.5 + (100/2400)),
-            (9600, 1.2, 5, 0.0, 0.0 + (50/9600 * 1.2)),
-            (19200, 1.5, 1, 1.0, 1.0 + (10/19200 * 1.5)),
+            # (baudrate, multiplier, size, protocol_timeout)
+            (2400, 1.0, 10, 0.5),
+            (9600, 1.2, 5, 0.0),
+            (19200, 1.5, 1, 1.0),
         ]
 
-        for baudrate, multiplier, size, protocol_timeout, expected in test_cases:
+        for baudrate, multiplier, size, protocol_timeout in test_cases:
             transport = MBusTransport("/dev/ttyUSB0", baudrate=baudrate, transmission_multiplier=multiplier)
-            calculated = protocol_timeout + ((size * 10) / transport.baudrate * transport.transmission_multiplier)
+
+            # Calculate expected using the transport's method
+            transmission_time = transport.calculate_transmission_time(size)
+            expected = protocol_timeout + (transmission_time * multiplier)
+
+            # Calculate using the actual read() method logic
+            calculated = protocol_timeout + (transport.calculate_transmission_time(size) * transport.transmission_multiplier)
+
             assert abs(calculated - expected) < 0.000001
 
     def test_timeout_with_zero_protocol_timeout(self) -> None:
@@ -180,10 +256,10 @@ class TestMBusTransportTimeouts:
 
         size = 4
         protocol_timeout = 0.0
-        transmission_time = (4 * 10) / 2400  # 0.016667
+        transmission_time = transport.calculate_transmission_time(size)  # Use correct calculation
         expected = transmission_time * 1.2  # Only transmission time with multiplier
 
-        calculated = protocol_timeout + ((size * 10) / transport.baudrate * transport.transmission_multiplier)
+        calculated = protocol_timeout + (transport.calculate_transmission_time(size) * transport.transmission_multiplier)
 
         assert abs(calculated - expected) < 0.000001
 
@@ -196,9 +272,9 @@ class TestMBusTransportTimeouts:
         size = 10
         protocol_timeout = 0.0
 
-        base_timeout = protocol_timeout + ((size * 10) / base_transport.baudrate * base_transport.transmission_multiplier)
-        fast_timeout = protocol_timeout + ((size * 10) / fast_transport.baudrate * fast_transport.transmission_multiplier)
-        slow_timeout = protocol_timeout + ((size * 10) / slow_transport.baudrate * slow_transport.transmission_multiplier)
+        base_timeout = protocol_timeout + (base_transport.calculate_transmission_time(size) * base_transport.transmission_multiplier)
+        fast_timeout = protocol_timeout + (fast_transport.calculate_transmission_time(size) * fast_transport.transmission_multiplier)
+        slow_timeout = protocol_timeout + (slow_transport.calculate_transmission_time(size) * slow_transport.transmission_multiplier)
 
         assert fast_timeout > base_timeout
         assert slow_timeout > fast_timeout
@@ -355,8 +431,8 @@ class TestMBusTransportIO:
 
                 await transport.read(4, protocol_timeout=0.5)
 
-                # Verify timeout calculation: 0.5 + (4 * 10 / 2400 * 1.2) = 0.52
-                expected_timeout = 0.5 + ((4 * 10) / 2400 * 1.2)
+                # Verify timeout calculation: 0.5 + (transmission_time * 1.2)
+                expected_timeout = 0.5 + (transport.calculate_transmission_time(4) * 1.2)
                 mock_wait_for.assert_called_once()
                 actual_timeout = mock_wait_for.call_args[1]['timeout']
                 assert abs(actual_timeout - expected_timeout) < 0.000001
@@ -371,7 +447,7 @@ class TestMBusTransportEdgeCases:
 
         size = 0
         protocol_timeout = 0.5
-        calculated = protocol_timeout + ((size * 10) / transport.baudrate * transport.transmission_multiplier)
+        calculated = protocol_timeout + (transport.calculate_transmission_time(size) * transport.transmission_multiplier)
 
         assert calculated == protocol_timeout  # Should equal protocol timeout only
 
@@ -381,10 +457,10 @@ class TestMBusTransportEdgeCases:
 
         size = 255  # Maximum M-Bus frame size
         protocol_timeout = 0.0
-        transmission_time = (255 * 10) / 2400  # 1.0625 seconds
-        expected = transmission_time * 1.2  # 1.275 seconds
+        transmission_time = transport.calculate_transmission_time(size)  # Use correct calculation
+        expected = transmission_time * 1.2
 
-        calculated = protocol_timeout + ((size * 10) / transport.baudrate * transport.transmission_multiplier)
+        calculated = protocol_timeout + (transport.calculate_transmission_time(size) * transport.transmission_multiplier)
 
         assert abs(calculated - expected) < 0.000001
 
@@ -394,10 +470,10 @@ class TestMBusTransportEdgeCases:
 
         size = 10
         protocol_timeout = 0.0
-        transmission_time = (10 * 10) / 115200  # Very small time
+        transmission_time = transport.calculate_transmission_time(size)  # Use correct calculation
         expected = transmission_time  # Should be less than 1ms
 
-        calculated = protocol_timeout + ((size * 10) / transport.baudrate * transport.transmission_multiplier)
+        calculated = protocol_timeout + (transport.calculate_transmission_time(size) * transport.transmission_multiplier)
 
         assert calculated < 0.001  # Less than 1ms
         assert abs(calculated - expected) < 0.000001

@@ -82,10 +82,28 @@ class MBusTransport:
         self._writer = None
         self._connected = False
 
-    @property
-    def baudrate(self) -> int:
-        """Get the configured baudrate."""
-        return int(self.serial_kwargs["baudrate"])
+    def calculate_transmission_time(self, size: int) -> float:
+        """Calculate transmission time for given number of bytes based on serial settings.
+
+        Args:
+            size: Number of bytes to transmit
+
+        Returns:
+            Time in seconds needed to transmit the bytes
+
+        Note:
+            Calculates based on actual serial configuration:
+            - Start bit: Always 1
+            - Data bits: From bytesize setting (usually 8 for M-Bus)
+            - Parity bit: 1 if parity enabled, 0 if disabled
+            - Stop bits: From stopbits setting (usually 1 for M-Bus)
+        """
+        return float(size * (
+            1 +  # start bit
+            int(self.serial_kwargs["bytesize"]) +  # data bits (usually 8)
+            (1 if self.serial_kwargs["parity"] != "N" else 0) +  # parity bit if enabled
+            float(self.serial_kwargs["stopbits"])  # stop bits (1, 1.5, or 2)
+        )) / int(self.serial_kwargs["baudrate"])
 
     async def open(self) -> None:
         """Open connection to M-Bus device or gateway.
@@ -179,9 +197,7 @@ class MBusTransport:
             raise MBusConnectionError("Transport is not connected")
 
         # Calculate timeout with transmission time multiplier for device variations
-        timeout = protocol_timeout + (
-            (size * 10) / self.baudrate * self.transmission_multiplier
-        )
+        timeout = protocol_timeout + (self.calculate_transmission_time(size) * self.transmission_multiplier)
 
         try:
             # Read exactly the requested number of bytes with timeout
