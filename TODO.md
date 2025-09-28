@@ -44,18 +44,18 @@
   - [x] Add `write()` method for sending bytes
   - [x] Implement `read()` with smart timeout calculation
 
-- [ ] **1.1.2: Smart timeout calculation**
-  - [ ] Calculate transmission time based on baudrate
-  - [ ] Add configurable timeout_margin parameter
-  - [ ] Handle different connection types (serial vs socket)
-  - [ ] Implement per-operation timeout logic
+- [x] **1.1.2: Smart timeout calculation**
+  - [x] Calculate transmission time based on baudrate
+  - [x] Add configurable transmission_multiplier parameter (replaced timeout_margin)
+  - [x] Protocol layer handles network delays (not transport)
+  - [x] Implement protocol_timeout parameter for flexible timing
 
-- [ ] **1.1.3: Exception handling**
-  - [ ] Create MBusError base class
-  - [ ] Add MBusConnectionError for transport issues
-  - [ ] Add MBusTimeoutError for timeout scenarios
-  - [ ] Add MBusProtocolError for protocol issues
-  - [ ] Implement proper error propagation
+- [x] **1.1.3: Exception handling**
+  - [x] Create MBusError base class
+  - [x] Add MBusConnectionError for transport issues
+  - [x] Add MBusTimeoutError for timeout scenarios
+  - [x] Add MBusProtocolError for protocol issues
+  - [x] Implement proper error propagation (transport uses MBusConnectionError)
 
 #### 1.2: Testing Transport Layer
 - [ ] **1.2.1: Unit tests**
