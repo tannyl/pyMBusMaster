@@ -370,6 +370,15 @@ if __name__ == "__main__":
 - **`pytest`**: Testing framework
 - **`sphinx`**: Documentation generation
 
+### Code Quality Standards
+- **Comprehensive Type Hinting**: All code must include complete type annotations
+  - Function/method parameters and return types
+  - Class-level annotations for all instance attributes (public and private)
+  - Use modern Python 3.13 syntax: `dict[str, Any]`, `list[int]`, `str | None`
+  - Target: 100% mypy compliance with strict mode
+- **Documentation**: Comprehensive docstrings for all public APIs
+- **Testing**: High test coverage with both unit and integration tests
+
 ### Project Structure
 ```
 pyMBusMaster/
