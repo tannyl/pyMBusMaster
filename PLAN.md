@@ -417,16 +417,40 @@ pyMBusMaster/
 
 ### M-Bus Protocol Timing Requirements
 
-According to EN 13757-2 standard, M-Bus has specific timing requirements for fault handling:
+According to EN 13757-2 and MBDOC48.PDF standards, M-Bus has specific timing requirements:
 
-- **Response timeout**: 330 bit periods + 50ms
+#### Inter-Telegram Timing
+- **Minimum wait between telegrams**: 11 bit periods
+  - Example at 2400 baud: 11/2400 = 0.0046 seconds (4.6ms)
+  - Example at 9600 baud: 11/9600 = 0.0011 seconds (1.1ms)
+
+#### Response Timeouts
+- **Response window**: 11 to 330 bit periods + 50ms
+  - Slaves must respond within this window after receiving valid telegram
+  - Masters should wait up to 330 bit periods + 50ms for response
   - Example at 2400 baud: (330/2400) + 0.050 = 0.188 seconds
   - Example at 9600 baud: (330/9600) + 0.050 = 0.084 seconds
-- **Idle time after failures**: Minimum 33 bit periods
+
+#### Error Recovery Timing
+- **Idle time after retry failures**: 33 bit periods
   - Example at 2400 baud: 33/2400 = 0.014 seconds (14ms)
+  - Applied only between retry attempts and after total failure
 - **Retry mechanism**: Up to 3 transmission attempts (original + 2 retries)
 
-These timing requirements must be considered in both transport and protocol layers.
+#### Timing Responsibility Distribution
+
+**Protocol Layer Responsibilities:**
+- Ensure 11+ bit times wait at end of each telegram session
+- For first byte reads: provide full response timeout (330 bit + 50ms)
+- For subsequent bytes: only transmission time needed (no extra response time)
+- Use 33 bit times wait after failed retries (instead of 11)
+- No timestamp tracking needed - timing guaranteed by session design
+
+**Transport Layer Responsibilities:**
+- Calculate transmission time for actual bytes: (N × 10 bits / baudrate)
+- Apply transmission_multiplier for device variations (default 1.2 = 20% extra time)
+- Handle byte-level I/O with protocol-provided base timeouts
+- Multiplier scales appropriately with data size (no fixed margins)
 
 ### Transport Layer Architecture
 
@@ -435,15 +459,15 @@ These timing requirements must be considered in both transport and protocol laye
 class MBusTransport:
     """Handles connection and raw byte I/O for M-Bus communication."""
 
-    def __init__(self, url: str, baudrate: int = 2400, timeout_margin: float = 0.5, **kwargs):
+    def __init__(self, url: str, baudrate: int = 2400, transmission_multiplier: float = 1.2, **kwargs):
         """
         Initialize transport (does not open connection).
 
         Args:
             url: Connection URL (serial port or socket)
             baudrate: Baud rate for serial connections
-            timeout_margin: Extra time (seconds) to add to calculated timeouts
-                           for slow/problematic devices (default 0.5s)
+            transmission_multiplier: Multiplier for transmission time calculation
+                                   for slow/problematic devices (default 1.2 = 20% extra)
             **kwargs: Additional serial parameters
         """
         # Store connection parameters
@@ -466,26 +490,28 @@ class MBusTransport:
         """Write raw bytes to transport."""
         # Check connected, write data, drain
 
-    async def read(self, size: int) -> bytes:
+    async def read(self, size: int, protocol_timeout: float = 0.0) -> bytes:
         """
-        Read exactly size bytes with automatically calculated timeout.
+        Read exactly size bytes with protocol-provided base timeout.
 
-        Timeout is calculated based on:
-        - Transmission time: (size * 10 bits / baudrate)
-        - M-Bus response timeout: (330 bit periods / baudrate) + 50ms
-        - Plus configurable timeout_margin for problematic devices
-        - Additional margin for socket connections
+        Timeout is calculated as:
+        - Protocol-provided base timeout (includes network delays for first byte)
+        - Plus transmission time: (size * 10 bits / baudrate) * transmission_multiplier
+
+        Args:
+            size: Number of bytes to read
+            protocol_timeout: Base timeout provided by protocol layer
+                            (0.0 means no extra response time needed)
 
         Returns:
             Exactly size bytes, or empty bytes on timeout
 
-        Note: Retries are handled at protocol layer, not here.
+        Note: Protocol layer handles M-Bus timing logic, retries, and network delays.
         """
         # Calculate timeout:
         # transmission_time = (size * 10) / self.baudrate
-        # response_timeout = (330 / self.baudrate) + 0.050  # M-Bus standard
-        # timeout = transmission_time + response_timeout + self.timeout_margin
-        # For socket URLs, add extra network margin
+        # adjusted_transmission_time = transmission_time * self.transmission_multiplier
+        # timeout = protocol_timeout + adjusted_transmission_time
         # Use reader.readexactly(size) with asyncio.wait_for(timeout)
         # Return empty bytes on timeout
 ```
@@ -690,10 +716,11 @@ class MBusProtocol:
 class MBusProtocol:
     """Protocol layer handling frame construction and parsing"""
 
-    # M-Bus timing constants (EN 13757-2)
-    RESPONSE_TIMEOUT_BITS = 330    # Bit periods for response timeout
+    # M-Bus timing constants (EN 13757-2 and MBDOC48.PDF)
+    RESPONSE_TIMEOUT_BITS = 330    # Bit periods for response timeout (max response window)
     RESPONSE_TIMEOUT_FIXED = 0.050 # Additional 50ms for response timeout
-    IDLE_TIME_BITS = 33            # Bit periods between failures
+    MIN_INTER_TELEGRAM_BITS = 11   # Minimum bit periods between telegrams
+    IDLE_TIME_BITS = 33            # Bit periods between retry failures
     MAX_RETRY_ATTEMPTS = 3         # Original transmission + 2 retries
 
     def __init__(self):
@@ -726,25 +753,56 @@ class MBusProtocol:
 
 ### Frame Reading Strategy
 
-The protocol layer also handles intelligent frame reading from the transport:
+The protocol layer handles intelligent frame reading using a byte-by-byte strategy with proper timing:
 
 ```python
 async def read_frame(self, transport: MBusTransport) -> bytes:
-    """Read complete M-Bus frame based on type"""
-    # Read first byte to determine frame type
-    first = await transport.read(1)
+    """Read complete M-Bus frame with proper M-Bus timing"""
+
+    # Read first byte with full response timeout (330 bit + 50ms)
+    response_timeout = (self.RESPONSE_TIMEOUT_BITS / transport.baudrate) + self.RESPONSE_TIMEOUT_FIXED
+    first = await transport.read(1, protocol_timeout=response_timeout)
+
+    if not first:
+        return b''  # Timeout
 
     if first == b'\xE5':
-        return first  # ACK - single byte
+        # ACK - single byte frame complete
+        await self._wait_session_end(success=True)
+        return first
     elif first == b'\x10':
-        rest = await transport.read(4)  # Short frame - 4 more bytes
-        return first + rest
+        # Short frame - read remaining 4 bytes (no extra protocol timeout needed)
+        rest = await transport.read(4, protocol_timeout=0.0)
+        frame = first + rest
+        await self._wait_session_end(success=bool(rest))
+        return frame
     elif first == b'\x68':
-        # Long frame - read L-fields to determine length
-        header = await transport.read(3)
-        length = header[0]
-        rest = await transport.read(length + 2)  # data + checksum + stop
-        return first + header + rest
+        # Long frame - read L-fields to determine total length
+        header = await transport.read(3, protocol_timeout=0.0)  # L, L, 0x68
+        if len(header) < 3:
+            await self._wait_session_end(success=False)
+            return first + header
+
+        length = header[0]  # Data length
+        rest = await transport.read(length + 2, protocol_timeout=0.0)  # data + checksum + stop
+        frame = first + header + rest
+        await self._wait_session_end(success=(len(rest) == length + 2))
+        return frame
+    else:
+        # Unknown frame type
+        await self._wait_session_end(success=False)
+        return first
+
+async def _wait_session_end(self, success: bool) -> None:
+    """Wait appropriate time at end of telegram session"""
+    if success:
+        # Normal completion - wait minimum 11 bit times
+        wait_time = 11 / self.transport.baudrate
+    else:
+        # Failed communication - wait 33 bit times for error recovery
+        wait_time = self.IDLE_TIME_BITS / self.transport.baudrate
+
+    await asyncio.sleep(wait_time)
 ```
 
 ### Benefits of This Design
