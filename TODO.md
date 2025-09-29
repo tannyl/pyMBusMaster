@@ -64,11 +64,11 @@
   - [x] Test error handling scenarios
   - [x] Mock serial connections for testing
 
-- [ ] **1.2.2: Integration tests**
-  - [ ] Test with mock TCP server (simulate M-Bus gateway)
-  - [ ] Test with virtual serial ports (pty pairs on Linux/Mac)
-  - [ ] Verify timeout behavior with simulated delays
-  - [ ] Test connection recovery after network interruption
+- [x] **1.2.2: Integration tests**
+  - [x] Test with mock TCP server (simulate M-Bus gateway)
+  - [x] Test with virtual serial ports (pty pairs on Linux/Mac)
+  - [x] Verify timeout behavior with simulated delays
+  - [x] Test connection recovery after network interruption
 
   Note: Manual testing against ethmbus.de-la.dk:10001 should be done during
   development but not included in automated test suite.

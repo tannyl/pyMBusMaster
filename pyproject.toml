@@ -80,8 +80,11 @@ addopts = [
 asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests",
+    "unit: marks tests as unit tests (fast, uses mocks)",
+    "integration: marks tests as integration tests (slower, uses real I/O)",
+    "timing: marks tests as timing-sensitive (may be flaky on slow systems)",
+    "serial: marks tests as requiring serial port simulation",
+    "network: marks tests as requiring network simulation",
 ]
 
 [tool.ruff]

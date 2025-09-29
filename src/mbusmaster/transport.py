@@ -82,14 +82,15 @@ class MBusTransport:
         self._writer = None
         self._connected = False
 
-    def calculate_transmission_time(self, size: int) -> float:
-        """Calculate transmission time for given number of bytes based on serial settings.
+    def _calculate_timeout(self, size: int, protocol_timeout: float = 0.0) -> float:
+        """Calculate total timeout for reading data.
 
         Args:
-            size: Number of bytes to transmit
+            size: Number of bytes to read
+            protocol_timeout: Base timeout from protocol layer (for network delays, etc.)
 
         Returns:
-            Time in seconds needed to transmit the bytes
+            Total timeout in seconds including protocol timeout and transmission time
 
         Note:
             Calculates based on actual serial configuration:
@@ -97,13 +98,21 @@ class MBusTransport:
             - Data bits: From bytesize setting (usually 8 for M-Bus)
             - Parity bit: 1 if parity enabled, 0 if disabled
             - Stop bits: From stopbits setting (usually 1 for M-Bus)
+            - Applies transmission_multiplier to account for device variations
         """
-        return float(size * (
+        # Calculate bits per byte based on serial configuration
+        bits_per_byte = (
             1 +  # start bit
-            int(self.serial_kwargs["bytesize"]) +  # data bits (usually 8)
-            (1 if self.serial_kwargs["parity"] != "N" else 0) +  # parity bit if enabled
-            float(self.serial_kwargs["stopbits"])  # stop bits (1, 1.5, or 2)
-        )) / int(self.serial_kwargs["baudrate"])
+            int(self.serial_kwargs["bytesize"]) +  # data bits
+            (1 if self.serial_kwargs["parity"] != "N" else 0) +  # parity bit
+            float(self.serial_kwargs["stopbits"])  # stop bits
+        )
+
+        # Calculate base transmission time
+        base_transmission_time = (size * bits_per_byte) / int(self.serial_kwargs["baudrate"])
+
+        # Return total timeout with multiplier applied
+        return protocol_timeout + base_transmission_time * self.transmission_multiplier
 
     async def open(self) -> None:
         """Open connection to M-Bus device or gateway.
@@ -196,13 +205,11 @@ class MBusTransport:
         if not self._connected or not self._reader:
             raise MBusConnectionError("Transport is not connected")
 
-        # Calculate timeout with transmission time multiplier for device variations
-        timeout = protocol_timeout + (self.calculate_transmission_time(size) * self.transmission_multiplier)
-
         try:
-            # Read exactly the requested number of bytes with timeout
+            # Read exactly the requested number of bytes with calculated timeout
             data = await asyncio.wait_for(
-                self._reader.readexactly(size), timeout=timeout
+                self._reader.readexactly(size),
+                timeout=self._calculate_timeout(size, protocol_timeout)
             )
             return data
         except TimeoutError:
