@@ -23,5 +23,9 @@ build/
 # Project specific
 reference/
 
+# Development testing (not committed)
+dev_mbus_test.py
+
 # Claude
 .claude/
+CLAUDE.local.md

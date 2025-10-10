@@ -1,9 +1,3 @@
-<!-- @import .claude/CLAUDE.local.md -->
-
-# Claude AI Assistant Instructions
-
-This file contains important instructions and context for Claude when working on the pyMBusMaster project.
-
 ## CRITICAL RULES
 
 1. **NEVER commit changes unless explicitly asked to commit**
@@ -13,8 +7,8 @@ This file contains important instructions and context for Claude when working on
    - The user will tell you when they want to commit changes
 
 2. **Python Version**
-   - This project uses Python 3.13 exclusively
-   - Do not add compatibility for older Python versions
+   - Do not add compatibility for older Python versions that the project does not support
+   - Refer to pyproject.toml for supported versions
 
 3. **Dependencies**
    - Use `pyserial-asyncio-fast` (not the original pyserial-asyncio)
@@ -30,49 +24,73 @@ This file contains important instructions and context for Claude when working on
 ## Development Guidelines
 
 1. **Code Style**
-   - Use type hints for all functions and methods
+   - Add type hints everywhere possible
+      - Class-level annotations for all instance attributes (public and private)
+      - Use shorthand union syntax `SomeType | None` instead of `Optional[SomeType]`
+     - Use modern Python typing: `dict[str, Any]`, `list[int]`, etc.
+      - Example:
+         ```python
+         class MyClass:
+            # Class-level attribute annotations
+            public_attr: str
+            _private_attr: int | None
+
+            def __init__(self, value: str) -> None:
+                  self.public_attr = value
+                  self._private_attr = None
+         ```
    - Follow the configuration in pyproject.toml
-   - Run ruff and mypy before suggesting code is complete
+   - Be judicious about creating variables which are used only once
+      - **Avoid when**: The expression is simple and clear inline
+         - Bad: `result = x + y; return result`
+         - Good: `return x + y`
+      - **Keep when**: They improve clarity for complex expressions
+         - Good: `bits_per_byte = 1 + bytesize + parity_bit + stopbits`
+         - Good: `base_transmission_time = (size * bits_per_byte) / baudrate`
+      - **Rule of thumb**: If the variable name adds documentation value, keep it
 
 2. **Testing**
+   - Run ruff, mypy, etc. before suggesting your task is complete
    - Write tests for new functionality
    - Use pytest with pytest-asyncio for async tests
    - Aim for high code coverage
 
 3. **Documentation**
    - Add docstrings to all public functions and classes
-   - Update README.md when adding major features
    - Keep TODO.md current with progress
+
+## Important Project Files
+
+### When Working on TODO Items
+- **ALWAYS reference PLAN.md** - Contains crucial architectural decisions, design patterns, and implementation details
+- Cross-reference TODO.md sections with corresponding PLAN.md sections for full context
+- The PLAN is the source of truth for implementation approach
+
+### Critical Work Guidelines
+- **ONLY work on the specific TODO sections requested** - Do NOT continue through the TODO list automatically
+- **Stop after completing requested sections** - Wait for new instructions before proceeding to other tasks
+- **If PLAN.md lacks sufficient detail** for requested sections - ASK for clarification rather than making assumptions
+- **Better to ask than guess** - Implementation details are important and should match expectations
+- **Never improvise architecture** - If design decisions aren't clear in PLAN.md, request guidance
+
 
 ## File Structure
 
 ```
-src/mbusmaster/     - Main package source code
-tests/              - Test files
-docs/               - Documentation source
-examples/           - Example code
-reference/          - Reference materials (ignored by git)
-```
-
-## Common Commands
-
-```bash
-# Run tests
-pytest
-
-# Type checking
-mypy src/mbusmaster/
-
-# Linting
-ruff check src/ tests/
-
-# Format code
-ruff format src/ tests/
+src/        - Main package source code
+tests/      - Test files
+docs/       - Documentation source
+examples/   - Example code
+reference/  - Reference materials (ignored by git)
 ```
 
 ## Important Notes
 
-- The `reference/` directory contains the old pyMeterBus code for reference
-- Branch protection is enabled - changes must go through PRs
-- The project is MIT licensed
-- Designed to be a modern replacement for pyMeterBus with async support
+The `reference/` directory contains
+- M-Bus specifications (EN 13757-3)
+- Documentation from manufacturers implementing M-Bus in their devices
+- Other related files.
+
+The original PDF files have been converted into .txt files for easy processing.
+
+Large files have also been split up into separate files containing the different chapters.
