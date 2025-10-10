@@ -1,303 +1,160 @@
-# pyMBusMaster Development TODO
+# TODO - pyMBusMaster Implementation
 
-## 🚧 Current Phase: Project Setup
+## Project Goal
+Implement M-Bus master library for reading data from meters
 
-### 📋 Immediate Tasks (Week 1)
-
-#### 0.1: Project Setup
-- [ ] **0.1.1: Update devcontainer configuration**
-  - [x] Add async development dependencies (pyserial-asyncio-fast, pydantic)
-  - [x] Add development tools (ruff, mypy, pytest-asyncio)
-  - [x] Update Python version requirements
-  - [x] Add M-Bus device testing capability (EthMBus-XL gateway: ethmbus.de-la.dk:10001)
-
-- [ ] **0.1.2: Create GitHub repository**
-  - [x] Initialize new repository: `pyMBusMaster`
-  - [ ] Set up repository settings (description, topics, license)
-  - [ ] Configure branch protection and merge settings
-  - [ ] Add repository templates (issues, PR, etc.)
-
-- [ ] **0.1.3: Initialize project structure**
-  - [x] Create modern Python project layout with `src/` structure
-  - [x] Setup `pyproject.toml` with project metadata and dependencies
-  - [x] Create basic package structure (`src/mbusmaster/`)
-  - [x] Add initial `__init__.py` and version management
-  - [x] Setup testing structure (`tests/unit/`, `tests/integration/`)
-  - [ ] Create file-based module structure: `transport.py`, `protocol.py`, `master.py` (exceptions.py ✓)
-
-- [ ] **0.1.4: Documentation setup**
-  - [x] Create comprehensive README.md
-  - [x] Setup documentation structure (`docs/`)
-  - [ ] Create contribution guidelines (CONTRIBUTING.md)
-  - [ ] Setup changelog format (CHANGELOG.md)
-
-## 📅 Development Phases
-
-### Phase 1: Transport Layer (Weeks 1-2)
-**Goal**: Solid foundation with connection management and raw I/O
-
-#### 1.1: Transport Layer Implementation
-- [x] **1.1.1: MBusTransport class**
-  - [x] Implement `__init__()` with URL parsing and timeout_margin
-  - [x] Add `open()` and `close()` methods using pyserial-asyncio-fast
-  - [x] Implement `is_connected()` status check
-  - [x] Add `write()` method for sending bytes
-  - [x] Implement `read()` with smart timeout calculation
-
-- [x] **1.1.2: Smart timeout calculation**
-  - [x] Calculate transmission time based on baudrate
-  - [x] Add configurable transmission_multiplier parameter (replaced timeout_margin)
-  - [x] Protocol layer handles network delays (not transport)
-  - [x] Implement protocol_timeout parameter for flexible timing
-
-- [x] **1.1.3: Exception handling**
-  - [x] Create MBusError base class
-  - [x] Add MBusConnectionError for transport issues
-  - [x] Add MBusTimeoutError for timeout scenarios
-  - [x] Add MBusProtocolError for protocol issues
-  - [x] Implement proper error propagation (transport uses MBusConnectionError)
-
-#### 1.2: Testing Transport Layer
-- [x] **1.2.1: Unit tests**
-  - [x] Test connection lifecycle (open/close)
-  - [x] Test timeout calculation logic
-  - [x] Test error handling scenarios
-  - [x] Mock serial connections for testing
-
-- [x] **1.2.2: Integration tests**
-  - [x] Test with mock TCP server (simulate M-Bus gateway)
-  - [x] Test with virtual serial ports (pty pairs on Linux/Mac)
-  - [x] Verify timeout behavior with simulated delays
-  - [x] Test connection recovery after network interruption
-
-  Note: Manual testing against ethmbus.de-la.dk:10001 should be done during
-  development but not included in automated test suite.
-
-#### 1.3: Testing Infrastructure
-- [ ] **1.3.1: Test setup**
-  - [ ] Configure pytest-asyncio
-  - [ ] Create test fixtures and mocks
-  - [ ] Setup serial port simulation
-  - [ ] Add test data from pyMeterBus
-
-- [ ] **1.3.2: Continuous Integration**
-  - [ ] Setup GitHub Actions for testing
-  - [ ] Add code quality checks (ruff, mypy)
-  - [ ] Setup test coverage reporting
-  - [ ] Add multiple Python version testing
-
-### Phase 2: Protocol Layer (Weeks 3-4)
-**Goal**: Complete M-Bus protocol with class-based telegram handling
-
-#### 2.1: Telegram Class Implementation
-- [ ] **2.1.1: Base telegram classes**
-  - [ ] Implement MBusTelegram base class
-  - [ ] Add calculate_checksum() method
-  - [ ] Create to_bytes() and from_bytes() interface
-  - [ ] Add proper error handling
-
-- [ ] **2.1.2: Outgoing telegrams (Master → Slave)**
-  - [ ] Implement ShortFrame base class
-  - [ ] Create SndNke class for reset commands
-  - [ ] Create ReqUD2 class with FCB management
-  - [ ] Add ReqUD1 class for special cases
-
-- [ ] **2.1.3: Incoming telegrams (Slave → Master)**
-  - [ ] Implement AckFrame class for single-byte ACK
-  - [ ] Create LongFrame class for data responses
-  - [ ] Add ControlFrame class for 9-byte responses
-  - [ ] Implement frame validation and checksum verification
-
-#### 2.2: Protocol Layer Integration
-- [ ] **2.2.1: MBusProtocol class**
-  - [ ] Implement FCB state management per address
-  - [ ] Add build_reset_frame() method
-  - [ ] Add build_request_frame() with FCB toggle
-  - [ ] Create parse_response() for incoming data
-
-- [ ] **2.2.2: Frame reading strategy**
-  - [ ] Implement intelligent frame type detection
-  - [ ] Add read_frame() method using transport layer
-  - [ ] Handle different frame lengths correctly
-  - [ ] Add timeout handling for incomplete frames
-
-#### 2.3: Data Parsing Implementation
-- [ ] **2.3.1: Variable data structure parsing**
-  - [ ] Parse DIF (Data Information Field)
-  - [ ] Parse VIF (Value Information Field)
-  - [ ] Extract measurement values with proper scaling
-  - [ ] Create MBusSlaveRecord objects
-
-- [ ] **2.3.2: MBusSlaveData construction**
-  - [ ] Parse device identification fields
-  - [ ] Extract manufacturer information
-  - [ ] Build list of measurement records
-  - [ ] Add timestamp and metadata
-
-#### 2.4: Testing Protocol Layer
-- [ ] **2.4.1: Unit tests for telegram classes**
-  - [ ] Test to_bytes() serialization
-  - [ ] Test from_bytes() parsing with valid data
-  - [ ] Test checksum calculation and validation
-  - [ ] Test error handling with invalid data
-
-- [ ] **2.4.2: Integration tests with real data**
-  - [ ] Test with captured M-Bus telegrams
-  - [ ] Verify frame reading with different device types
-  - [ ] Test FCB management across multiple requests
-  - [ ] Validate data parsing accuracy
-
-### Phase 3: Application Layer (Weeks 5-6)
-**Goal**: User-facing MBusMaster API and device operations
-
-#### 3.1: MBusMaster Class Implementation
-- [ ] **3.1.1: Core master functionality**
-  - [ ] Implement MBusMaster __init__() with transport and protocol setup
-  - [ ] Add open() and close() connection management
-  - [ ] Implement is_connected() status check
-  - [ ] Add context manager support (__aenter__, __aexit__)
-  - [ ] Add bus_lock for safe concurrent operations
-
-- [ ] **3.1.2: Device communication methods**
-  - [ ] Implement ping_addresses() for device availability checking
-  - [ ] Add query_addresses() for data collection
-  - [ ] Create scan_addresses() for device discovery
-  - [ ] Add timeout_margin parameter handling
-
-- [ ] **3.1.3: Error handling and recovery**
-  - [ ] Proper exception propagation from lower layers
-  - [ ] Add retry logic for intermittent failures
-  - [ ] Implement graceful handling of non-responsive devices
-  - [ ] Add logging for debugging and monitoring
-
-#### 3.2: Integration and Testing
-- [ ] **3.2.1: End-to-end functionality**
-  - [ ] Test complete ping → acknowledge flow
-  - [ ] Test complete reset → request → data flow
-  - [ ] Verify multi-device operations work correctly
-  - [ ] Test concurrent operations with bus locking
-
-- [ ] **3.2.2: Real device testing**
-  - [ ] Test with actual M-Bus devices (3 meters via EthMBus-XL gateway)
-  - [ ] Verify data accuracy against known values
-  - [ ] Test with different device types and manufacturers
-  - [ ] Performance testing with multiple devices
-  - [ ] Test socket:// URL format with ethmbus.de-la.dk:10001
-
-#### 3.3: Documentation and Examples
-- [ ] **3.3.1: Usage examples**
-  - [ ] Basic ping and query examples
-  - [ ] Context manager usage patterns
-  - [ ] Error handling examples
-  - [ ] Multi-device monitoring example
-
-- [ ] **3.3.2: API documentation**
-  - [ ] Comprehensive docstrings for all public methods
-  - [ ] Type hints for all parameters and return values
-  - [ ] Clear examples in docstrings
-  - [ ] Error condition documentation
-
-### Phase 4: Integration Support (Weeks 7-8)
-**Goal**: Framework integration and examples
-
-#### 4.1: Integration Helpers
-- [ ] **4.1.1: Generic integration support**
-  - [ ] Create integration base classes
-  - [ ] Add configuration helpers
-  - [ ] Implement state synchronization
-  - [ ] Add error handling patterns
-
-- [ ] **4.1.2: Home Assistant integration**
-  - [ ] Create HA integration example
-  - [ ] Add entity management patterns
-  - [ ] Implement configuration flow
-  - [ ] Add device registry integration
-
-#### 4.2: Examples and Documentation
-- [ ] **4.2.1: Example applications**
-  - [ ] Basic usage examples
-  - [ ] Monitoring application
-  - [ ] Data logging example
-  - [ ] Web dashboard example
-
-- [ ] **4.2.2: Documentation**
-  - [ ] API documentation with Sphinx
-  - [ ] Integration guides
-  - [ ] Tutorial and quickstart
-  - [ ] Migration guide from pyMeterBus
-
-## 🔧 Technical Debt and Improvements
-
-### 5.1: Code Quality
-- [ ] Add comprehensive docstrings
-- [ ] Implement consistent error messages
-- [ ] Add performance benchmarks
-- [ ] Create debugging tools
-
-### 5.2: Testing
-- [ ] Add property-based testing
-- [ ] Create integration test suite
-- [ ] Add stress testing
-- [ ] Implement test data generation
-
-### 5.3: Performance
-- [ ] Profile async operations
-- [ ] Optimize frame parsing
-- [ ] Implement caching strategies for device information
-
-## 🚀 Future Features (Beyond v1.0)
-
-### 6.1: Protocol Extensions
-- [ ] **6.1.1: Wireless M-Bus (wM-Bus)**
-  - [ ] Add wireless protocol support
-  - [ ] Implement encryption handling
-  - [ ] Add radio communication layer
-
-### 6.2: Advanced Features
-- [ ] **6.2.1: Protocol analysis tools**
-  - [ ] Frame analyzer and debugger
-  - [ ] Protocol trace recording
-
-### 6.3: User Interface
-- [ ] **6.3.1: Command-line tools**
-  - [ ] Device discovery CLI
-  - [ ] Data reading CLI
-
-## 📊 Success Metrics
-
-### 7.1: Technical Metrics
-- [ ] **7.1.1: Test coverage > 90%**
-- [ ] **7.1.2: All functions have type hints**
-- [ ] **7.1.3: Documentation coverage > 80%**
-
-### 7.2: User Experience Metrics
-- [ ] **7.2.1: Basic usage example < 10 lines of code**
-- [ ] **7.2.2: Complete integration example < 50 lines**
-- [ ] **7.2.3: Clear error messages for common issues**
-
-### 7.3: Community Metrics
-- [ ] **7.3.1: GitHub repository setup**
-- [ ] **7.3.2: PyPI package published**
-- [ ] **7.3.3: Documentation site deployed**
+## Current Status
+- ✅ Transport layer complete and tested
+- ✅ Architecture and design complete (PLAN.md)
+- 🚧 Ready to start Protocol layer implementation
 
 ---
 
-## 📝 Notes
+## Phase 1: Protocol Layer (Foundation)
 
-### 8.1: Development Environment
-- Using Python 3.13 exclusively (latest Python version)
-- VS Code devcontainer for consistent development environment
-- GitHub repository for version control and collaboration
+### 1.1 Constants File (`constants.py`)
+- [ ] Extract frame structure constants (START, STOP, ACK bytes)
+- [ ] Extract address constants (broadcast, no station, reserved)
+- [ ] Extract C-field values (SND_NKE, REQ_UD2, etc.)
+- [ ] Extract CI-field values from EN 13757-3:2018
+- [ ] Extract DIF constants (data types, special functions, function fields)
+- [ ] Extract LVAR interpretation ranges
+- [ ] Extract VIF/VIFE codes (Tables 10-16)
+- [ ] Extract device type constants
+- [ ] Extract BCD error codes
+- [ ] Organize with IntEnum classes and helper functions
+- [ ] Add spec references as comments
 
-### 8.2: Naming Decision
-- **Project name**: `pyMBusMaster`
-- **Package name**: `pyMBusMaster`
-- **Import name**: `mbusmaster`
-- **Repository**: `https://github.com/{username}/pyMBusMaster`
+### 1.2 Telegram Data Structures
+- [ ] Define base `Telegram` class
+- [ ] Define `ACKTelegram` class
+- [ ] Define `ShortFrameTelegram` class
+- [ ] Define `UserDataTelegram` class (with status, records, has_more_telegrams)
+- [ ] Define `DataRecord` class (DIF, VIF, data)
+- [ ] Define supporting classes (StatusByte, DIFInfo, VIFInfo, etc.)
 
-### 8.3: Dependencies Strategy
-- Minimal runtime dependencies for broad compatibility
-- Rich development dependencies for excellent DX
-- Optional dependencies for framework integrations
+### 1.3 Telegram Encoder (`TelegramEncoder`)
+- [ ] Implement `encode_snd_nke(address)` - device reset
+- [ ] Implement `encode_req_ud2(address)` - request user data
+- [ ] Implement `encode_req_ud1(address)` - request alarm
+- [ ] Implement checksum calculation helper
+- [ ] Test with real hardware using dev_mbus_test.py
 
-This TODO serves as a living document that will be updated as development progresses and priorities shift.
+### 1.4 Telegram Decoder (`TelegramDecoder`)
+- [ ] Implement state machine (DecoderState enum)
+- [ ] Implement `__init__` with expected_address and allowed_types
+- [ ] Implement `bytes_needed()` method
+- [ ] Implement `feed(data)` method with progressive validation
+- [ ] Implement `is_complete()` method
+- [ ] Implement `get_telegram()` method
+- [ ] Implement `_validate_start()` - detect frame type
+- [ ] Implement `_validate_length()` - L-field validation
+- [ ] Implement `_validate_checksum()` - frame checksum
+- [ ] Implement `_advance_state()` - state transitions
+- [ ] Implement internal frame type handlers (ACK, Short, Long)
+- [ ] Test with real hardware using dev_mbus_test.py
+
+### 1.5 Data Record Parsing
+- [ ] Design data record parsing approach (progressive vs batch)
+- [ ] Implement DIF/DIFE parsing
+- [ ] Implement VIF/VIFE parsing
+- [ ] Implement data extraction based on DIF type
+- [ ] Handle variable length data (LVAR)
+- [ ] Parse manufacturer data (after 0x0F/0x1F marker)
+- [ ] Extract has_more_telegrams flag from status
+- [ ] Test with real hardware using dev_mbus_test.py
+
+**Phase 1 Success Criteria**: Can encode/decode all basic telegram types with real hardware
+
+---
+
+## Phase 2: Session Layer (Orchestration)
+
+### 2.1 Session Class Setup
+- [ ] Create `MBusSession` class
+- [ ] Add configuration parameters (max_retries, retry_delay, base_timeout)
+- [ ] Initialize with Transport and TelegramEncoder
+
+### 2.2 Core Session Methods
+- [ ] Implement `reset_device(address)` with retry logic
+- [ ] Implement `_receive_telegram()` with progressive reading
+- [ ] Implement `_send_and_receive()` with retry logic
+- [ ] Test reset with real hardware using dev_mbus_test.py
+
+### 2.3 Multi-Telegram Support
+- [ ] Implement `read_user_data(address)` with multi-telegram loop
+- [ ] Handle has_more_telegrams flag
+- [ ] Collect records from all telegrams
+- [ ] Test with real hardware using dev_mbus_test.py
+
+### 2.4 Error Recovery
+- [ ] Implement retry logic per M-Bus specification
+- [ ] Handle timeout errors
+- [ ] Handle protocol validation errors
+- [ ] Test error scenarios with real hardware
+
+**Phase 2 Success Criteria**: Can perform complete read sequence with multi-telegram handling
+
+---
+
+## Phase 3: Master API (User Interface)
+
+### 3.1 Master Class
+- [ ] Create `MBusMaster` class
+- [ ] Implement `__init__` with connection parameters
+- [ ] Implement `connect()` method
+- [ ] Implement `disconnect()` method
+- [ ] Implement context manager (`__aenter__`, `__aexit__`)
+
+### 3.2 User-Facing Methods
+- [ ] Implement `read_meter(address)` - main use case
+- [ ] Create `MeterData` result wrapper class
+- [ ] Add helper methods (get_value, get_all_values)
+- [ ] Test with real hardware using dev_mbus_test.py
+
+### 3.3 Documentation
+- [ ] Add docstrings to all public methods
+- [ ] Create usage examples in dev_mbus_test.py
+
+**Phase 3 Success Criteria**: Users can read meter data with single method call
+
+---
+
+## Phase 4: Formal Testing (After Implementation)
+
+### 4.1 Unit Tests
+- [ ] Protocol layer: Test encoding/decoding with known test vectors
+- [ ] Protocol layer: Test checksum calculation
+- [ ] Protocol layer: Test data record parsing
+- [ ] Session layer: Test with mocked Transport
+- [ ] Session layer: Test retry logic
+- [ ] Master layer: Test with mocked Session
+
+### 4.2 Integration Tests
+- [ ] Full stack: Test with simulated M-Bus devices
+- [ ] Test multi-telegram sequences
+- [ ] Test error scenarios and recovery
+
+### 4.3 Test Organization
+- [ ] Move tests to `tests/` directory
+- [ ] Clean up dev_mbus_test.py
+
+---
+
+## Future Features (Phase 4+)
+
+- [ ] Secondary addressing (12-digit ID selection)
+- [ ] Alarm reading (REQ_UD1)
+- [ ] Device scanning/discovery
+- [ ] Baud rate switching
+- [ ] Clock synchronization
+- [ ] Encrypted communication (AES)
+
+---
+
+## Notes
+
+- Test frequently with real hardware (ethmbus.de-la.dk:10001, addresses 1, 5, 10)
+- Use `dev_mbus_test.py` for ongoing testing (not in git)
+- Refer to EN 13757-3:2018 specification for all implementation details
+- Formal unit/integration tests written at the END

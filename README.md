@@ -2,7 +2,7 @@
 
 > ⚠️ **Work in Progress**: This project is in early development and is not yet functional.
 
-Modern async Python library for M-Bus (Meter-Bus) communication (in development).
+Modern async Python library for M-Bus (Meter-Bus) communication.
 
 ## Planned Features
 
@@ -20,7 +20,6 @@ This package is not yet available on PyPI.
 
 - Python 3.13+
 - pyserial-asyncio-fast
-- pydantic
 
 ## License
 
@@ -28,4 +27,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Goals
 
-The goal is making a good async M-Bus library for a Home Assistant integration, while still making it easy to use by anyone else.
+The goal is making a solid async M-Bus library for a Home Assistant integration, while still making it easy to use by anyone else.
+
+I am also personally using this as an opportunity to learn and experiment with Claude Code.

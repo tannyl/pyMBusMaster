@@ -18,8 +18,6 @@ keywords = [
     "async",
     "asyncio",
     "serial",
-    "home-assistant",
-    "iot",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

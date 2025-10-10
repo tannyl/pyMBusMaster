@@ -1,1171 +1,1443 @@
-# pyMBusMaster: Modern Asynchronous M-Bus Library
+# pyMBusMaster Architecture Plan
 
-## Project Vision
+## Overview
 
-Create a modern, async-first Python library for M-Bus (Meter-Bus) communication. It will act as master on the M-Bus and a gateway which other applications can use to get data from M-Bus devices.
+This document describes the architecture for pyMBusMaster, a modern async Python library for M-Bus (Meter-Bus) communication. The design prioritizes simplicity, testability, and separation of concerns while supporting the full M-Bus protocol.
 
-## M-Bus Protocol Documentation Resources
+## Design Philosophy
 
-### Current Standards Status
+- **Separation of concerns**: Each layer has a single, clear responsibility
+- **Testability**: Pure functions where possible, easy to mock dependencies
+- **Async-first**: Built with asyncio throughout
+- **Type-safe**: Comprehensive type hints for all interfaces
+- **Simple API**: Hide complexity from end users
 
-**Latest Version**: EN 13757-2:2018+A1:2023 (published January 2024)
-- German DIN Version: DIN EN 13757-2:2024-12 (published December 2024)
-- Replaces previous EN 13757-2:2018-06
-- Available for purchase from national standardization bodies (BSI, DIN, NEN, etc.)
+## Architecture Layers
 
-### Free Documentation Resources
+The library is organized into 4 layers, from low-level to high-level:
 
-**OMS (Open Metering System) Specification** - Our primary reference:
-- Website: https://oms-group.org/en/specification/
-- Volume 2 Primary Communication v5.0.1: Available in `reference/OMS-Spec_Vol2_Primary_v501_01.pdf`
-- Comprehensive and FREE access to M-Bus documentation
-- Covers wired M-Bus, security, encryption (AES-128), and integration
-- Modern extensions beyond basic EN 13757 standard
-
-**M-Bus.com Documentation**:
-- Website: https://m-bus.com/
-- Data Link Layer: https://m-bus.com/documentation-wired/05-data-link-layer
-- Application Layer: https://m-bus.com/documentation-wired/06-application-layer
-- Legacy MBDOC48.PDF: Available in `reference/` (reflects late 1990s spec)
-
-### Key Open Source Implementations for Reference
-
-1. **pyMeterBus** (Python): https://github.com/ganehag/pyMeterBus - **The original library that inspired this project**
-   - Synchronous design, mature codebase with good parsing logic
-   - Available in `reference/` directory for code patterns and protocol handling
-2. **libmbus** (C): https://github.com/rscada/libmbus - Well-established, production-ready
-3. **m-bus-parser** (Rust): https://github.com/maebli/m-bus-parser - Modern, with Python bindings
-4. **wmbusmeters**: https://github.com/wmbusmeters/wmbusmeters - Comprehensive tool for wired/wireless
-5. **Valley.Net.Protocols.MeterBus** (C#): https://github.com/sympthom/Valley.Net.Protocols.MeterBus - UDP/TCP/serial
-6. **jMBus** (Java): https://www.openmuc.org/m-bus/ - LGPL licensed implementation
-
-### Implementation Strategy
-
-- **Primary Reference**: Use OMS Specification v5.0.1 (already in reference/)
-- **Study existing implementations**: libmbus and m-bus-parser for patterns
-- **Compliance Target**: EN 13757-2:2018+A1:2023 requirements
-- **Frame Support**: Both short and long frame formats
-- **Baud Rates**: Standard 300-9600 minimum
-- **Modern Features**: Consider OMS security extensions for encryption
-
-## Design Principles
-
-### 1. Simple and Intuitive API
-- **Single Entry Point**: One `MBusMaster` class handles everything
-- **No Complex Chains**: Users don't pass objects between methods
-- **Direct Results**: Methods return final data, not intermediate objects
-- **URL-Style Connections**: Support `socket://host:port` and `/dev/ttyUSB0` formats
-
-### 2. Async-First Architecture
-- Built from the ground up with `asyncio` support
-- Non-blocking serial communication using `pyserial-asyncio-fast`
-- Proper async/await patterns throughout the codebase
-- Background connection management
-
-### 3. Hidden Complexity
-- **Internal Architecture**: Complex protocol handling happens behind the scenes
-- **Smart Defaults**: Reasonable defaults for all configuration
-- **Explicit Management**: Connection lifecycle controlled by user with open()/close()
-- **Clean API Surface**: Users only see what they need
-
-### 4. Bus Safety and Concurrency
-- **Single Operation Chain**: Only one M-Bus operation runs at a time using asyncio locks
-- **Automatic Queuing**: Multiple concurrent calls automatically wait their turn
-- **No Bus Collisions**: Prevents overlapping requests that would corrupt responses
-- **Transparent to Users**: Locking happens internally - users just await their calls
-
-### 5. Framework Agnostic
-- Not tied to any specific framework (Home Assistant, Django, FastAPI, etc.)
-- Easy integration with any async Python application
-- Clean, simple interface for custom integrations
-
-## API Design
-
-### Public API - Simple and Direct
-
-```python
-from mbusmaster import MBusMaster
-
-class MBusMaster:
-    """Simple, all-in-one M-Bus master interface"""
-
-    def __init__(self, url: str, **options):
-        """
-        Create M-Bus master with flexible connection options:
-
-        - Serial: "/dev/ttyUSB0", baudrate=2400
-        - TCP: "socket://192.168.1.100:10001"
-        """
-
-    async def open(self) -> None:
-        """Open connection to M-Bus"""
-
-    async def close(self) -> None:
-        """Close connection to M-Bus"""
-
-    async def ping_addresses(self, addresses: list[int]) -> dict[int, bool]:
-        """Check if meters at addresses respond"""
-
-    async def query_addresses(self, addresses: list[int]) -> dict[int, MBusSlaveData]:
-        """Get current readings from meters"""
-
-    async def scan_addresses(self, addresses: list[int]) -> dict[int, MBusSlaveInfo]:
-        """Find all responding meters on the bus"""
 ```
-
-### Internal Architecture (Hidden from Users)
-
-The library internally uses a three-layer architecture but users never interact with these directly:
-
-- **Application Layer** (`master.py`): User-facing API, orchestrates operations, manages bus locking
-- **Protocol Layer** (`protocol.py`): M-Bus frame construction, parsing, validation, and data extraction
-- **Transport Layer** (`transport.py`): Handles serial/TCP connections and raw byte I/O
-
-Key architectural components:
-- **Connection Manager**: Explicit connection management with open()/close() methods
-- **Bus Lock Manager**: Uses `asyncio.Lock()` to ensure only one operation chain runs at a time
-
-#### Bus Safety Implementation
-
-```python
-# Internal implementation (hidden from users)
-class MBusMaster:
-    def __init__(self, url: str, **options):
-        self._bus_lock = asyncio.Lock()  # One operation at a time
-
-    async def ping_addresses(self, addresses: list[int]) -> dict[int, bool]:
-        async with self._bus_lock:  # Automatic queuing
-            results = {}
-            for address in addresses:
-                # Send ping frame and wait for response
-                results[address] = await self._ping_single(address)
-            return results
-
-    async def query_addresses(self, addresses: list[int]) -> dict[int, MBusSlaveData]:
-        async with self._bus_lock:  # Waits for ping_addresses to finish
-            results = {}
-            for address in addresses:
-                # Send request frame and parse response
-                results[address] = await self._query_single(address)
-            return results
+┌─────────────────────────────────────────┐
+│     Layer 4: Master (master.py)         │  ← User-facing API
+│  "read_meter(address) -> MeterData"     │
+└─────────────────────────────────────────┘
+                  ↓ uses
+┌─────────────────────────────────────────┐
+│    Layer 3: Session (session.py)        │  ← Communication orchestration
+│  "Send/receive telegrams with retries"  │
+│  "Handle multi-telegram sequences"      │
+└─────────────────────────────────────────┘
+                  ↓ uses
+┌─────────────────────────────────────────┐
+│   Layer 2: Protocol (protocol.py)       │  ← Encode/decode/validate
+│  "Encode: params -> bytes"              │
+│  "Decode: bytes -> structured data"     │
+└─────────────────────────────────────────┘
+                  ↓ uses
+┌─────────────────────────────────────────┐
+│   Layer 1: Transport (transport.py)     │  ← Raw byte I/O
+│  "write(bytes), read(size) -> bytes"    │  ✅ Already implemented
+└─────────────────────────────────────────┘
 ```
-
-This ensures that even if multiple sensors in Home Assistant call `query_addresses()` simultaneously, they execute in sequence without corrupting each other's data.
-
-### Data Structures
-
-```python
-from pydantic import BaseModel
-from datetime import datetime
-from enum import Enum
-
-class MBusSlaveInfo(BaseModel):
-    """Base information about an M-Bus slave device (meter)"""
-
-    # Identification
-    serial_number: str          # Unique meter serial number
-    manufacturer: str           # Manufacturer code (e.g., "KAM" for Kamstrup)
-    version: int                # Device version/generation
-    device_type: str            # Device type description
-
-    # Medium information
-    medium: str                 # What the meter measures: "electricity", "water", "gas", "heat"
-
-    # Status
-    status: int                 # Status byte from meter
-    access_number: int          # Counter incremented with each telegram
-
-    # Optional extended info
-    firmware_version: str | None = None
-    hardware_version: str | None = None
-
-
-class MBusRecordType(str, Enum):
-    """Types of data records that can be returned by M-Bus devices"""
-    ENERGY = "energy"
-    POWER = "power"
-    VOLUME = "volume"
-    FLOW = "flow"
-    TEMPERATURE = "temperature"
-    VOLTAGE = "voltage"
-    CURRENT = "current"
-    FREQUENCY = "frequency"
-    PRESSURE = "pressure"
-    TIME = "time"
-    DATE = "date"
-    ERROR = "error"
-    OTHER = "other"
-
-
-class MBusRecordFunction(str, Enum):
-    """Function codes for M-Bus data records"""
-    INSTANTANEOUS = "instantaneous"
-    MAXIMUM = "maximum"
-    MINIMUM = "minimum"
-    ERROR_STATE = "error"
-
-
-class MBusSlaveRecord(BaseModel):
-    """Individual data record from an M-Bus device
-
-    M-Bus devices return multiple records, each containing a specific
-    measurement or value with its own metadata.
-    """
-
-    # What this record represents
-    type: MBusRecordType        # Type of measurement
-    description: str             # Human-readable description
-
-    # The actual data
-    value: float | int | str     # The value (can be numeric or string)
-    unit: str                    # Unit of measurement (kWh, m³, °C, etc.)
-
-    # M-Bus specific metadata
-    storage_number: int = 0      # Storage/tariff number (0 = current, 1-15 = historical)
-    function: MBusRecordFunction = MBusRecordFunction.INSTANTANEOUS
-    device_unit: int = 0         # Device unit number (for multi-channel devices)
-
-    # Optional extended info
-    timestamp: datetime | None = None  # If record has specific timestamp
-
-
-class MBusSlaveData(MBusSlaveInfo):
-    """Complete meter data including identification and all data records
-
-    Inherits all identification fields from MBusSlaveInfo and adds
-    the actual measurement records returned by the device.
-    """
-
-    # When the data was read
-    timestamp: datetime
-
-    # All data records from the device
-    records: list[MBusSlaveRecord]
-
-    def get_record(self, type: MBusRecordType, storage: int = 0) -> MBusSlaveRecord | None:
-        """Helper to find specific record by type and storage number"""
-        for record in self.records:
-            if record.type == type and record.storage_number == storage:
-                return record
-        return None
-
-    def get_all_records(self, type: MBusRecordType) -> list[MBusSlaveRecord]:
-        """Helper to get all records of a specific type"""
-        return [r for r in self.records if r.type == type]
-```
-
-#### Usage Examples
-
-```python
-# scan_addresses returns just MBusSlaveInfo
-scan_results = await master.scan_addresses([1, 2, 3])
-for addr, info in scan_results.items():
-    if info:
-        print(f"Meter {addr}: {info.manufacturer} {info.serial_number}")
-        print(f"  Type: {info.medium}")
-
-# query_addresses returns full MBusSlaveData with all records
-data_results = await master.query_addresses([1, 2, 3])
-for addr, data in data_results.items():
-    if data:
-        # Access identification (inherited from MBusSlaveInfo)
-        print(f"Meter {addr}: {data.serial_number}")
-        print(f"  Manufacturer: {data.manufacturer}")
-
-        # Access all records
-        for record in data.records:
-            print(f"  {record.description}: {record.value} {record.unit}")
-
-        # Find specific records
-        energy = data.get_record(MBusRecordType.ENERGY)
-        if energy:
-            print(f"  Energy: {energy.value} {energy.unit}")
-
-        # Get all temperature records (flow and return for heat meters)
-        temps = data.get_all_records(MBusRecordType.TEMPERATURE)
-        for temp in temps:
-            print(f"  {temp.description}: {temp.value} {temp.unit}")
-```
-
-This flexible structure means:
-- M-Bus devices can return any number and type of records
-- Each record is self-describing with type, unit, and metadata
-- Helper methods make it easy to find specific values
-- Supports multi-tariff meters (using storage_number)
-- Handles device-specific and future record types
-
-### Example Usage
-
-```python
-import asyncio
-from mbusmaster import MBusMaster
-
-async def main():
-    # Connect to M-Bus gateway via TCP
-    master = MBusMaster("socket://ethmbus.de-la.dk:10001")
-    await master.open()  # Explicit connection
-
-    # Ping single meter
-    results = await master.ping_addresses([5])
-    if results[5]:
-        print("Meter 5 is responding!")
-
-    # Ping multiple meters at once
-    results = await master.ping_addresses([1, 5, 10, 15])
-    for addr, responding in results.items():
-        print(f"Meter {addr}: {'OK' if responding else 'No response'}")
-
-    # Get meter data
-    data_dict = await master.query_addresses([5])
-    data = data_dict[5]
-    if data:
-        # Use the flexible record structure
-        energy = data.get_record(MBusRecordType.ENERGY)
-        if energy:
-            print(f"Energy: {energy.value} {energy.unit}")
-        power = data.get_record(MBusRecordType.POWER)
-        if power:
-            print(f"Power: {power.value} {power.unit}")
-
-    # Query multiple meters efficiently
-    all_data = await master.query_addresses([1, 5, 10])
-    for addr, data in all_data.items():
-        if data:
-            energy = data.get_record(MBusRecordType.ENERGY)
-            if energy:
-                print(f"Meter {addr}: {energy.value} {energy.unit}")
-
-    # Scan for all meters on specific addresses
-    scan_results = await master.scan_addresses(range(1, 251))
-    found_meters = [addr for addr, info in scan_results.items() if info is not None]
-    print(f"Found meters at: {found_meters}")
-
-    # Close connection when done
-    await master.close()
-
-# Serial connection example with context manager
-async def serial_example():
-    async with MBusMaster("/dev/ttyUSB0", baudrate=2400) as master:
-        # Connection opened automatically
-        results = await master.query_addresses([1, 2, 3])
-        for addr, data in results.items():
-            print(f"Meter {addr}: {data}")
-        # Connection closed automatically
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-## Technical Decisions
-
-### Dependencies
-- **Python 3.13**: Latest Python with newest async features and type hints
-- **`pyserial-asyncio-fast`**: Async serial communication (maintained Home Assistant fork)
-- **`pydantic`**: Data validation and serialization
-- **`pytest-asyncio`**: Async testing framework
-
-### Development Tools
-- **`ruff`**: Linting and formatting
-- **`mypy`**: Static type checking
-- **`pytest`**: Testing framework
-- **`sphinx`**: Documentation generation
-
-### Code Quality Standards
-- **Comprehensive Type Hinting**: All code must include complete type annotations
-  - Function/method parameters and return types
-  - Class-level annotations for all instance attributes (public and private)
-  - Use modern Python 3.13 syntax: `dict[str, Any]`, `list[int]`, `str | None`
-  - Target: 100% mypy compliance with strict mode
-- **Documentation**: Comprehensive docstrings for all public APIs
-- **Testing**: High test coverage with both unit and integration tests
-
-### Project Structure
-```
-pyMBusMaster/
-├── .devcontainer/          # Development container configuration
-├── src/mbusmaster/         # Main package
-│   ├── transport.py        # Transport layer implementation
-│   ├── protocol.py         # M-Bus protocol, frames, and data parsing
-│   ├── master.py           # MBusMaster main class
-│   ├── exceptions.py       # Custom exceptions
-│   └── __init__.py         # Public API exports
-├── tests/                  # Test suite
-│   ├── unit/               # Unit tests
-│   ├── integration/        # Integration tests
-│   └── conftest.py         # Test configuration
-├── docs/                   # Documentation
-│   ├── api/                # API documentation
-│   ├── examples/           # Usage examples
-│   └── integration/        # Framework integration guides
-├── examples/               # Example applications
-│   ├── basic/              # Basic usage examples
-│   ├── home_assistant/     # Home Assistant integration
-│   └── monitoring/         # Continuous monitoring examples
-├── PLAN.md                 # This document
-├── TODO.md                 # Development roadmap
-├── README.md               # Project introduction
-└── pyproject.toml          # Project configuration
-```
-
-## Transport Layer Design
-
-### Connection Management Philosophy
-- **Explicit lifecycle**: User controls connection with `open()` and `close()` methods
-- **Early validation**: Connection tested at `open()`, not during first data operation
-- **Single transport class**: Leverages `pyserial-asyncio-fast` for all connection types
-- **Clean separation**: Transport handles connections and raw I/O, protocol layer handles M-Bus specifics
-
-### M-Bus Protocol Timing Requirements
-
-According to EN 13757-2 and MBDOC48.PDF standards, M-Bus has specific timing requirements:
-
-#### Inter-Telegram Timing
-- **Minimum wait between telegrams**: 11 bit periods
-  - Example at 2400 baud: 11/2400 = 0.0046 seconds (4.6ms)
-  - Example at 9600 baud: 11/9600 = 0.0011 seconds (1.1ms)
-
-#### Response Timeouts
-- **Response window**: 11 to 330 bit periods + 50ms
-  - Slaves must respond within this window after receiving valid telegram
-  - Masters should wait up to 330 bit periods + 50ms for response
-  - Example at 2400 baud: (330/2400) + 0.050 = 0.188 seconds
-  - Example at 9600 baud: (330/9600) + 0.050 = 0.084 seconds
-
-#### Error Recovery Timing
-- **Idle time after retry failures**: 33 bit periods
-  - Example at 2400 baud: 33/2400 = 0.014 seconds (14ms)
-  - Applied only between retry attempts and after total failure
-- **Retry mechanism**: Up to 3 transmission attempts (original + 2 retries)
-
-#### Timing Responsibility Distribution
-
-**Protocol Layer Responsibilities:**
-- Ensure 11+ bit times wait at end of each telegram session
-- For first byte reads: provide full response timeout (330 bit + 50ms)
-- For subsequent bytes: only transmission time needed (no extra response time)
-- Use 33 bit times wait after failed retries (instead of 11)
-- No timestamp tracking needed - timing guaranteed by session design
-
-**Transport Layer Responsibilities:**
-- Calculate transmission time for actual bytes: (N × 10 bits / baudrate)
-- Apply transmission_multiplier for device variations (default 1.2 = 20% extra time)
-- Handle byte-level I/O with protocol-provided base timeouts
-- Multiplier scales appropriately with data size (no fixed margins)
-
-### Transport Layer Architecture
-
-#### MBusTransport Class
-```python
-class MBusTransport:
-    """Handles connection and raw byte I/O for M-Bus communication."""
-
-    def __init__(self, url: str, baudrate: int = 2400, transmission_multiplier: float = 1.2, **kwargs):
-        """
-        Initialize transport (does not open connection).
-
-        Args:
-            url: Connection URL (serial port or socket)
-            baudrate: Baud rate for serial connections
-            transmission_multiplier: Multiplier for transmission time calculation
-                                   for slow/problematic devices (default 1.2 = 20% extra)
-            **kwargs: Additional serial parameters
-        """
-        # Store connection parameters
-        # Initialize reader/writer as None
-
-    async def open(self) -> None:
-        """Open connection. Raises MBusConnectionError on failure."""
-        # Use serial_asyncio.open_serial_connection()
-        # Set connected flag
-
-    async def close(self) -> None:
-        """Close connection (idempotent)."""
-        # Close writer, wait for close
-        # Clear reader/writer references
-
-    def is_connected(self) -> bool:
-        """Check connection status."""
-
-    async def write(self, data: bytes) -> None:
-        """Write raw bytes to transport."""
-        # Check connected, write data, drain
-
-    async def read(self, size: int, protocol_timeout: float = 0.0) -> bytes:
-        """
-        Read exactly size bytes with protocol-provided base timeout.
-
-        Timeout is calculated as:
-        - Protocol-provided base timeout (includes network delays for first byte)
-        - Plus transmission time: (size * 10 bits / baudrate) * transmission_multiplier
-
-        Args:
-            size: Number of bytes to read
-            protocol_timeout: Base timeout provided by protocol layer
-                            (0.0 means no extra response time needed)
-
-        Returns:
-            Exactly size bytes, or empty bytes on timeout
-
-        Note: Protocol layer handles M-Bus timing logic, retries, and network delays.
-        """
-        # Calculate timeout:
-        # transmission_time = (size * 10) / self.baudrate
-        # adjusted_transmission_time = transmission_time * self.transmission_multiplier
-        # timeout = protocol_timeout + adjusted_transmission_time
-        # Use reader.readexactly(size) with asyncio.wait_for(timeout)
-        # Return empty bytes on timeout
-```
-
-#### Connection URL Support
-- **Serial ports**: `/dev/ttyUSB0`, `COM3`
-- **TCP sockets**: `socket://192.168.1.100:10001`
-- **RFC2217**: `rfc2217://192.168.1.100:10001`
-- All handled transparently by `pyserial-asyncio-fast`
-
-### MBusMaster Integration
-
-```python
-class MBusMaster:
-    def __init__(self, url: str, timeout_margin: float = 0.5, **options):
-        """
-        Initialize master (no connection yet).
-
-        Args:
-            url: Connection URL
-            timeout_margin: Extra seconds added to calculated timeouts
-                          Increase for slow/problematic devices
-            **options: Additional options (baudrate, etc.)
-        """
-        self.transport = MBusTransport(url, timeout_margin=timeout_margin, **options)
-
-    async def open(self) -> None:
-        """Open M-Bus connection."""
-        await self.transport.open()
-
-    async def close(self) -> None:
-        """Close M-Bus connection."""
-        await self.transport.close()
-
-    # Context manager support
-    async def __aenter__(self):
-        await self.open()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-```
-
-### Usage Patterns
-
-#### Explicit Management
-```python
-master = MBusMaster("/dev/ttyUSB0")
-await master.open()  # Test connection early
-# ... use master ...
-await master.close()
-```
-
-#### Context Manager
-```python
-async with MBusMaster("/dev/ttyUSB0") as master:
-    # Connection opened automatically
-    # ... use master ...
-# Connection closed automatically
-```
-
-#### Connection Testing
-```python
-master = MBusMaster("/dev/ttyUSB0")
-try:
-    await master.open()
-    print("Connected!")
-except MBusConnectionError:
-    print("Connection failed")
-```
-
-### Benefits
-- **Fail early**: Connection problems detected immediately at `open()`
-- **Resource control**: User decides when to allocate/free serial port
-- **Clean errors**: Separate connection errors from protocol errors
-- **Persistent connection**: Efficient for multiple operations
-- **Simple implementation**: One transport class for all connection types
-
-## Protocol Layer Design
-
-### Telegram Class Architecture
-
-The protocol layer uses a class-based approach to represent M-Bus telegrams, making the code clean, type-safe, and maintainable.
-
-#### Base Telegram Class
-```python
-class MBusTelegram:
-    """Base class for all M-Bus telegrams"""
-
-    def to_bytes(self) -> bytes:
-        """Serialize telegram to bytes for sending"""
-        raise NotImplementedError
-
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "MBusTelegram":
-        """Parse bytes into telegram object"""
-        raise NotImplementedError
-
-    def calculate_checksum(self, data: bytes) -> int:
-        """Calculate M-Bus checksum"""
-        return sum(data) & 0xFF
-```
-
-#### Outgoing Telegrams (Master → Slave)
-```python
-class ShortFrame(MBusTelegram):
-    """Short frame for master commands (5 bytes)"""
-
-    def __init__(self, c_field: int, address: int):
-        self.c_field = c_field
-        self.address = address
-
-    def to_bytes(self) -> bytes:
-        # Build: 0x10 | C | A | Checksum | 0x16
-
-class SndNke(ShortFrame):
-    """Reset/Initialize slave command"""
-    def __init__(self, address: int):
-        super().__init__(c_field=0x40, address=address)
-
-class ReqUD2(ShortFrame):
-    """Request user data with FCB management"""
-    def __init__(self, address: int, fcb: bool = False):
-        c_field = 0x7B if fcb else 0x5B  # Toggle FCB bit
-        super().__init__(c_field=c_field, address=address)
-```
-
-#### Incoming Telegrams (Slave → Master)
-```python
-class AckFrame(MBusTelegram):
-    """Single byte acknowledgment (0xE5)"""
-
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "AckFrame":
-        # Validate ACK byte
-
-class LongFrame(MBusTelegram):
-    """Variable length frame with user data"""
-
-    def __init__(self, c_field: int, address: int, ci_field: int, data: bytes):
-        self.c_field = c_field
-        self.address = address
-        self.ci_field = ci_field
-        self.data = data
-
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "LongFrame":
-        # Parse: 0x68 | L | L | 0x68 | C | A | CI | Data | Check | 0x16
-        # Validate structure and checksum
-        # Extract fields
-
-    def parse_data(self) -> MBusSlaveData:
-        """Parse user data into structured MBusSlaveData"""
-        # Parse DIFs, VIFs, extract measurement records
-```
-
-#### Telegram Factory
-```python
-class TelegramFactory:
-    """Factory for parsing incoming telegrams"""
-
-    @staticmethod
-    def parse(data: bytes) -> MBusTelegram:
-        """Determine telegram type and parse accordingly"""
-        # Identify by first byte: 0xE5 (ACK), 0x68 (Long), etc.
-```
-
-### Fault Handling and Retries
-
-The protocol layer implements M-Bus standard fault handling according to EN 13757-2:
-
-#### Telegram Validation
-- **Character level**: Check Start/Parity/Stop bits
-- **Frame level**: Verify Start/Checksum/Stop characters
-- **Long frames**: Validate second start byte, L-field matching, character count
-
-#### Retry Mechanism
-```python
-class MBusProtocol:
-    MAX_RETRY_ATTEMPTS = 3  # Original + 2 retries
-    IDLE_TIME_BITS = 33     # Bit periods between failures
-
-    async def send_with_retry(self, frame: bytes, address: int) -> bytes | None:
-        """Send frame with up to 3 attempts and proper idle times"""
-        for attempt in range(self.MAX_RETRY_ATTEMPTS):
-            response = await self.send_and_receive(frame)
-            if response and self.validate_response(response):
-                return response
-
-            if attempt < self.MAX_RETRY_ATTEMPTS - 1:
-                # Wait idle time before retry (33 bit periods)
-                idle_time = self.IDLE_TIME_BITS / self.baudrate
-                await asyncio.sleep(idle_time)
-
-        # After 3 failures, try SND_NKE before giving up
-        await self.send_nke(address)
-        return None
-```
-
-### Protocol Layer Integration
-```python
-class MBusProtocol:
-    """Protocol layer handling frame construction and parsing"""
-
-    # M-Bus timing constants (EN 13757-2 and MBDOC48.PDF)
-    RESPONSE_TIMEOUT_BITS = 330    # Bit periods for response timeout (max response window)
-    RESPONSE_TIMEOUT_FIXED = 0.050 # Additional 50ms for response timeout
-    MIN_INTER_TELEGRAM_BITS = 11   # Minimum bit periods between telegrams
-    IDLE_TIME_BITS = 33            # Bit periods between retry failures
-    MAX_RETRY_ATTEMPTS = 3         # Original transmission + 2 retries
-
-    def __init__(self):
-        self.fcb_state = {}  # Track FCB per address
-
-    def build_reset_frame(self, address: int) -> bytes:
-        """Build SND_NKE reset frame"""
-        return SndNke(address).to_bytes()
-
-    def build_request_frame(self, address: int) -> bytes:
-        """Build REQ_UD2 frame with FCB management"""
-        # Toggle FCB for this address
-        fcb = self.fcb_state.get(address, False)
-        frame = ReqUD2(address, fcb)
-        self.fcb_state[address] = not fcb
-        return frame.to_bytes()
-
-    def parse_response(self, data: bytes) -> MBusTelegram | MBusSlaveData | None:
-        """Parse response from slave"""
-        if not data:
-            return None
-
-        telegram = TelegramFactory.parse(data)
-
-        if isinstance(telegram, LongFrame):
-            return telegram.parse_data()  # Return structured data
-
-        return telegram  # Return ACK or other telegram types
-```
-
-### Frame Reading Strategy
-
-The protocol layer handles intelligent frame reading using a byte-by-byte strategy with proper timing:
-
-```python
-async def read_frame(self, transport: MBusTransport) -> bytes:
-    """Read complete M-Bus frame with proper M-Bus timing"""
-
-    # Read first byte with full response timeout (330 bit + 50ms)
-    response_timeout = (self.RESPONSE_TIMEOUT_BITS / transport.baudrate) + self.RESPONSE_TIMEOUT_FIXED
-    first = await transport.read(1, protocol_timeout=response_timeout)
-
-    if not first:
-        return b''  # Timeout
-
-    if first == b'\xE5':
-        # ACK - single byte frame complete
-        await self._wait_session_end(success=True)
-        return first
-    elif first == b'\x10':
-        # Short frame - read remaining 4 bytes (no extra protocol timeout needed)
-        rest = await transport.read(4, protocol_timeout=0.0)
-        frame = first + rest
-        await self._wait_session_end(success=bool(rest))
-        return frame
-    elif first == b'\x68':
-        # Long frame - read L-fields to determine total length
-        header = await transport.read(3, protocol_timeout=0.0)  # L, L, 0x68
-        if len(header) < 3:
-            await self._wait_session_end(success=False)
-            return first + header
-
-        length = header[0]  # Data length
-        rest = await transport.read(length + 2, protocol_timeout=0.0)  # data + checksum + stop
-        frame = first + header + rest
-        await self._wait_session_end(success=(len(rest) == length + 2))
-        return frame
-    else:
-        # Unknown frame type
-        await self._wait_session_end(success=False)
-        return first
-
-async def _wait_session_end(self, success: bool) -> None:
-    """Wait appropriate time at end of telegram session"""
-    if success:
-        # Normal completion - wait minimum 11 bit times
-        wait_time = 11 / self.transport.baudrate
-    else:
-        # Failed communication - wait 33 bit times for error recovery
-        wait_time = self.IDLE_TIME_BITS / self.transport.baudrate
-
-    await asyncio.sleep(wait_time)
-```
-
-### Benefits of This Design
-
-1. **Type Safety**: Each telegram type is a distinct class
-2. **Separation of Concerns**: Construction vs parsing clearly separated
-3. **FCB Management**: Automatic Frame Count Bit tracking
-4. **Extensibility**: Easy to add new telegram types or commands
-5. **Testability**: Each class can be unit tested independently
-6. **Clean API**: Consistent `to_bytes()`/`from_bytes()` pattern
-
-## Development Phases
-
-### Phase 1: Foundation (Weeks 1-2)
-- Project setup and structure
-- Basic async transport layer with explicit connection management
-- Core frame parsing (adapted from pyMeterBus)
-- Connection management implementation
-- Basic test suite
-
-### Phase 2: Protocol Implementation (Weeks 3-4)
-- M-Bus protocol implementation
-- Device discovery
-- Error handling and recovery
-- Comprehensive testing
-
-### Phase 3: Device Abstraction (Weeks 5-6)
-- High-level device API
-- Data parsing and validation
-- Monitoring capabilities
-- Documentation
-
-### Phase 4: Integration Support (Weeks 7-8)
-- Framework integration helpers
-- Home Assistant integration example
-- Additional examples
-- Performance optimization
-
-## Success Criteria
-
-### Technical
-- **Non-blocking**: All operations are truly async
-- **Reliable**: Robust error handling and recovery
-- **Fast**: Efficient protocol implementation
-- **Type-safe**: Comprehensive type hints
-- **Well-tested**: >90% test coverage
-
-### Developer Experience
-- **Easy to integrate**: Simple, intuitive API
-- **Well-documented**: Clear documentation with examples
-- **Framework-friendly**: Easy integration with popular frameworks
-- **Maintainable**: Clean, readable code structure
-
-### Community
-- **Open source**: MIT licensed for maximum compatibility
-- **Community-driven**: Accept contributions and feedback
-- **Stable**: Semantic versioning and backward compatibility
-- **Supported**: Regular updates and bug fixes
-
-## Future Considerations
-
-### Potential Extensions
-- **Wireless M-Bus support**: Extend to support wM-Bus protocol
-- **Multiple transports**: Support TCP, USB, Bluetooth transports
-- **Device-specific drivers**: Specialized drivers for common meter types
-- **Protocol analyzers**: Tools for debugging and protocol analysis
-- **GUI tools**: Desktop applications for meter configuration
-
-### Performance Optimizations
-- **Connection pooling**: Manage multiple serial connections
-- **Caching**: Intelligent caching of device information
-- **Batch operations**: Optimize multiple device reads
-- **Background monitoring**: Efficient continuous data collection
-
-This plan provides the foundation for creating a modern, maintainable M-Bus library that addresses current limitations while being extensible for future needs.
 
 ---
 
-# M-Bus Protocol Overview
+## Layer 1: Transport Layer ✅
 
-Based on comprehensive research of the M-Bus protocol documentation (MBDOC48.PDF), pyMeterBus implementation, and libmbus C library.
+**File**: `transport.py`
+**Status**: ✅ Complete and tested
 
-## What is M-Bus?
+### Responsibility
+Raw byte I/O and connection management. No knowledge of M-Bus protocol or telegram structure.
 
-**M-Bus (Meter-Bus)** is a European standard (EN 13757-2) for remote reading of gas, electricity, water, and heat meters. It enables centralized data collection from utility meters using a two-wire bus system that carries both power and data.
+### Key Features
+- Support for serial ports, TCP sockets, and RFC2217
+- Automatic timeout calculation based on baud rate and byte size
+- Connection state management
+- Input buffer clearing before writes
+- Smart transmission time calculation with configurable multiplier
 
-## Architecture & Communication Model
-
-M-Bus follows a **master-slave architecture**:
-- **Master**: Central unit that initiates all communication (typically a data collector)
-- **Slaves**: Individual meters that respond only when addressed
-- **Bus topology**: Up to 250 slaves on a single bus segment
-- **Half-duplex communication**: Only one device transmits at a time
-
-## Physical Layer
-
-### Power & Communication
-- **Single two-wire bus** carries both power and data
-- **Voltage modulation**: 24V (mark/1) to 36V (space/0)
-- **Current modulation**: 1.5mA (mark/1) to 22mA (space/0)
-- **Maximum distance**: 350m per segment
-- **Baud rates**: 300, 600, 1200, 2400, 4800, 9600 bps (typically 2400)
-- **Bus-powered slaves**: Meters draw power from the bus itself
-
-### Electrical Characteristics
-- Masters provide 24-42V DC to the bus
-- Slaves modulate current consumption to send data
-- Built-in protection against short circuits and polarity reversal
-
-## Data Link Layer - Telegram Formats
-
-M-Bus defines four telegram types for different communication needs:
-
-### 1. Single Character (1 byte)
-- **ACK (0xE5)**: Acknowledgment of successful reception
-- Used for simple confirmations
-
-### 2. Short Frame (5 bytes)
+### Public API
+```python
+class Transport:
+    async def open() -> None
+    async def close() -> None
+    def is_connected() -> bool
+    async def write(data: bytes) -> None
+    async def read(size: int, protocol_timeout: float = 0.0) -> bytes
 ```
-Start | C-Field | A-Field | Checksum | Stop
-0x10  | Control | Address | Sum      | 0x16
+
+### Design Notes
+- Idempotent operations (safe to call open/close multiple times)
+- Returns empty bytes on timeout (no exceptions)
+- Marks connection as failed on errors
+- Clears input buffer before each write to prevent stale data
+
+---
+
+## M-Bus Protocol Constants
+
+**File**: `constants.py`
+**Status**: 🚧 To be implemented
+
+### Purpose
+
+Extract all M-Bus protocol constant values from EN 13757-3:2018 specification into a single, well-organized constants file. This provides:
+- **Single source of truth** for all protocol constants
+- **No magic numbers** in code
+- **Easy reference** during implementation
+- **Spec traceability** with comments linking to specification sections
+
+### Constant Categories
+
+Based on EN 13757-3:2018, the following constant categories will be extracted:
+
+#### 1. Frame Structure Constants
+- Frame start bytes: Long frame (0x68), Short frame (0x10), ACK (0xE5)
+- Frame stop byte (0x16)
+
+#### 2. Address Constants
+- Special addresses: Broadcast (0xFF), No station (0xFE), Reserved (0xFD)
+- Normal address range: 0-250
+
+#### 3. C-Field (Control Field) Values
+- Command codes from EN 13757-2: SND_NKE, REQ_UD2, REQ_UD1, SND_UD, RSP_UD, etc.
+
+#### 4. CI-Field (Control Information) Values
+- Application layer protocol identifiers from EN 13757-3:2018
+- Variable data structure codes and other protocol identifiers
+
+#### 5. DIF (Data Information Field) Constants
+- Data type codes from Table 4: integers, BCD, real, variable length, etc.
+- Special function codes from Table 6: manufacturer data, more records follow, idle filler, global readout
+- Function field codes from Table 7: instantaneous, maximum, minimum, error state
+
+#### 6. LVAR (Variable Length) Constants
+- Interpretation ranges from Table 5: text strings, positive/negative BCD, binary numbers
+
+#### 7. VIF (Value Information Field) Constants
+- Primary VIF codes from Table 10: energy, volume, mass, power, temperature, pressure, flow, etc.
+- Special VIF codes from Table 11: plain text, extensions, etc.
+- VIFE extension codes from Tables 12-16: multipliers, combinable codes, etc.
+
+#### 8. Device Type Constants
+- M-Bus device types: water, gas, heat, electricity, breaker, valve, etc.
+
+#### 9. BCD Error Codes
+- Non-BCD hex codes for error signaling from Annex B
+
+### Benefits
+
+1. **Code clarity**: No magic numbers like `if byte == 0x68:`
+   - Instead: `if byte == FRAME_START_LONG:`
+
+2. **Easy maintenance**: Update constants in one place
+
+3. **Spec compliance**: Comments reference exact specification sections
+
+4. **IDE support**: Autocomplete and type hints for all constants
+
+5. **Testing**: Easy to verify constants match specification
+
+### Implementation Priority
+
+This file should be implemented **first** before any other Protocol layer code, as all encoders/decoders will reference these constants.
+
+### Implementation Approach
+
+**Strategy**: Complete `constants.py` as thoroughly as possible upfront by systematically going through all tables in EN 13757-3:2018 and extracting constant values.
+
+**Steps**:
+1. Go through specification tables systematically (Tables 1-18, Annexes)
+2. Extract all constant values into appropriate classes/enums
+3. Add comments with specification table references
+4. If we discover problems or missing constants during Protocol layer implementation, we update the file
+
+**Why this approach**:
+- All constants available from the start
+- Less context switching later
+- Clear overview of what the spec contains
+- Can fix/adjust as needed during implementation
+
+---
+
+## Layer 2: Protocol Layer
+
+**File**: `protocol.py`
+**Status**: 🚧 To be implemented (requires `constants.py` first)
+
+### Responsibility
+Pure encode/decode/validate operations for M-Bus telegrams. This layer is stateless and performs only data transformations.
+
+### Key Responsibilities
+1. **Encoding**: Convert parameters to bytes ready for transmission
+2. **Decoding**: Parse raw bytes into structured data objects
+3. **Validation**: Verify checksums, frame structure, telegram types
+4. **Metadata extraction**: Multi-telegram flags, status bytes, error codes
+
+### Important Principles
+- **Pure functions**: No I/O, no state, no side effects
+- **Immediate validation**: Decode and validate received data immediately
+- **Expected type checking**: Decoder knows what telegram type to expect
+- **Exception on mismatch**: Throws error if received data doesn't match expected type
+
+### Telegram Types
+Based on EN 13757-3:2018, the protocol supports these telegram types:
+
+- **ACK** (E5h): Single character acknowledgment
+- **Short Frame**: C-field + A-field + checksum (no data)
+- **Long Frame**: Full frame with CI-field and data payload
+- **Control Frame**: Used for specific commands
+
+### Commands (C-field values)
+- `SND_NKE (40h)`: Send Link Reset - Initialize/reset device
+- `REQ_UD2 (5Bh)`: Request User Data (Class 2) - Request meter data
+- `REQ_UD1 (5Ah)`: Request User Data (Class 1) - Request alarm data
+- `SND_UD (53h)`: Send User Data - Send configuration/commands to meter
+- `RSP_UD`: Response User Data - Device response with data
+
+### Progressive Decoding Strategy
+
+Instead of reading all bytes at once and then validating, we use progressive decoding:
+
+1. **Read small chunks** (1-2 bytes at a time)
+2. **Validate immediately** after each read
+3. **Decoder tells Session** how many bytes to read next
+4. **Fail fast** if anything is wrong
+
+**Example: Long Frame Decoding Flow**
 ```
-- Control commands without data payload
-- Examples: SND_NKE (reset), REQ_UD1 (request user data)
+Step 1: Read 1 byte
+  → Got: 0x68 (START byte)
+  → Validate: Is this expected frame type? ✓
+  → Decoder state: "Need 2 bytes for L-field"
 
-### 3. Control Frame (9 bytes)
+Step 2: Read 2 bytes
+  → Got: 0x1F 0x1F (length = 31)
+  → Validate: Do both L-fields match? ✓
+  → Calculate: Total payload size
+  → Decoder state: "Need 1 byte for second START"
+
+Step 3: Read 1 byte
+  → Got: 0x68 (second START)
+  → Validate: Correct? ✓
+  → Decoder state: "Need 1 byte for C-field"
+
+... continues progressively...
+
+Step N: Final validation
+  → All bytes received
+  → Validate: Checksum correct? ✓
+  → Parse: Extract has_more_telegrams flag
+  → Return: Complete Telegram object
 ```
-Start | C-Field | A-Field | CI-Field | 4 Data Bytes | Checksum | Stop
-0x68  | Control | Address | App Code | Data         | Sum      | 0x16
+
+**Advantages:**
+- **Fail fast**: Detect errors immediately, don't waste time reading bad data
+- **Efficient**: Only read what we need based on validated state
+- **Clear state**: Decoder tracks exactly where we are in the frame
+- **Better timeouts**: Each small read has appropriate timeout
+- **Progressive validation**: Each field validated as we go
+
+### Key Classes
+
+#### Encoding (Simple - Pure Functions)
+```python
+class TelegramEncoder:
+    """Encodes telegrams into bytes for transmission (stateless)"""
+
+    @staticmethod
+    def encode_snd_nke(address: int) -> bytes:
+        """
+        Build SND_NKE telegram (device reset).
+
+        Returns short frame: START + C + A + CHECKSUM + STOP
+        Example: 10 40 05 45 16 (reset device at address 5)
+        """
+
+    @staticmethod
+    def encode_req_ud2(address: int) -> bytes:
+        """
+        Build REQ_UD2 telegram (request user data).
+
+        Returns short frame: START + C + A + CHECKSUM + STOP
+        Example: 10 5B 05 60 16 (request data from address 5)
+        """
+
+    @staticmethod
+    def encode_req_ud1(address: int) -> bytes:
+        """Build REQ_UD1 telegram (request alarm data)"""
+
+    @staticmethod
+    def encode_snd_ud(address: int, data: bytes) -> bytes:
+        """Build SND_UD telegram (send user data to device)"""
+
+    @staticmethod
+    def _calculate_checksum(data: bytes) -> int:
+        """Calculate M-Bus checksum (sum of all bytes, modulo 256)"""
 ```
-- Commands with fixed 4-byte data payload
 
-### 4. Long Frame (variable length)
+#### Decoding (Complex - State Machine)
+```python
+class TelegramDecoder:
+    """
+    Progressive telegram decoder with internal state machine.
+
+    Usage pattern (from Session layer):
+        decoder = TelegramDecoder(expected_address=5)
+
+        while not decoder.is_complete():
+            bytes_needed = decoder.bytes_needed()
+            data = await transport.read(bytes_needed)
+            decoder.feed(data)  # Validates and updates state
+
+        telegram = decoder.get_telegram()
+    """
+
+    # State tracking
+    _state: DecoderState
+    _buffer: bytearray
+    _expected_address: int | None
+    _frame_length: int | None
+
+    # Flexible response handling
+    _allowed_types: set[FrameType]
+
+    def __init__(
+        self,
+        expected_address: int | None = None,
+        allowed_types: set[FrameType] | None = None
+    ):
+        """
+        Initialize decoder.
+
+        Args:
+            expected_address: Expected device address (None = accept any)
+            allowed_types: Set of allowed frame types (None = auto-detect)
+                         Allows Session to say "expect ACK or Error response"
+        """
+        self._state = DecoderState.EXPECT_START
+        self._buffer = bytearray()
+        self._expected_address = expected_address
+        self._allowed_types = allowed_types or {FrameType.ANY}
+
+    def bytes_needed(self) -> int:
+        """
+        Returns how many bytes to read next.
+
+        Based on current state:
+        - EXPECT_START: 1 byte
+        - EXPECT_LENGTH: 2 bytes (L-field x2)
+        - EXPECT_START2: 1 byte
+        - EXPECT_C_FIELD: 1 byte
+        - EXPECT_PAYLOAD: calculated from L-field
+        - etc.
+        """
+        if self._state == DecoderState.EXPECT_START:
+            return 1
+        elif self._state == DecoderState.EXPECT_LENGTH:
+            return 2
+        elif self._state == DecoderState.EXPECT_PAYLOAD:
+            return self._frame_length  # Already calculated
+        # ... etc
+
+    def feed(self, data: bytes) -> None:
+        """
+        Feed received bytes to decoder. Validates immediately.
+
+        Updates internal state and advances to next step.
+
+        Raises:
+            MBusProtocolError: If validation fails at any step
+        """
+        if len(data) != self.bytes_needed():
+            raise MBusProtocolError(
+                f"Expected {self.bytes_needed()} bytes, got {len(data)}"
+            )
+
+        self._buffer.extend(data)
+
+        # Validate based on current state
+        if self._state == DecoderState.EXPECT_START:
+            self._validate_start(data[0])
+        elif self._state == DecoderState.EXPECT_LENGTH:
+            self._validate_length(data)
+        elif self._state == DecoderState.EXPECT_CHECKSUM:
+            self._validate_checksum(data[0])
+        # ... etc
+
+        # Advance to next state
+        self._advance_state()
+
+    def is_complete(self) -> bool:
+        """Check if telegram is fully decoded"""
+        return self._state == DecoderState.COMPLETE
+
+    def get_telegram(self) -> Telegram:
+        """
+        Return complete decoded telegram.
+
+        Only callable after is_complete() returns True.
+
+        Returns appropriate telegram type:
+        - ACKTelegram
+        - ShortFrameTelegram
+        - UserDataTelegram
+        - etc.
+        """
+        if not self.is_complete():
+            raise MBusProtocolError("Telegram not complete")
+
+        return self._parse_telegram()
+
+    # Internal validation methods
+    def _validate_start(self, byte: int) -> None:
+        """Validate START byte and determine frame type"""
+        if byte == 0xE5:  # ACK
+            self._frame_type = FrameType.ACK
+        elif byte == 0x10:  # Short frame
+            self._frame_type = FrameType.SHORT
+        elif byte == 0x68:  # Long frame
+            self._frame_type = FrameType.LONG
+        else:
+            raise MBusProtocolError(f"Invalid START byte: 0x{byte:02X}")
+
+        # Check if this frame type is allowed
+        if (self._allowed_types != {FrameType.ANY} and
+            self._frame_type not in self._allowed_types):
+            raise MBusProtocolError(
+                f"Unexpected frame type: {self._frame_type}"
+            )
+
+    def _validate_length(self, data: bytes) -> None:
+        """Validate L-field (both bytes must match)"""
+        if data[0] != data[1]:
+            raise MBusProtocolError(
+                f"L-field mismatch: {data[0]} != {data[1]}"
+            )
+        self._frame_length = data[0]
+
+    def _validate_checksum(self, checksum: int) -> None:
+        """Validate checksum against accumulated data"""
+        # Calculate checksum of all bytes except START, STOP, and CHECKSUM
+        calculated = sum(self._buffer[1:-2]) % 256
+        if calculated != checksum:
+            raise MBusProtocolError(
+                f"Checksum error: expected 0x{calculated:02X}, "
+                f"got 0x{checksum:02X}"
+            )
+
+    def _advance_state(self) -> None:
+        """Advance to next decoder state based on frame type and current state"""
+        # State machine logic here
+        # Different paths for ACK, Short Frame, Long Frame
+        pass
+
+    def _parse_telegram(self) -> Telegram:
+        """
+        Parse complete buffer into appropriate Telegram object.
+
+        For UserDataTelegram:
+        - Extract CI-field
+        - Parse status byte
+        - Parse data records (DIF/VIF/Data)
+        - Check has_more_telegrams flag in status byte
+        - Extract manufacturer data if present
+        """
+        pass
+
+class DecoderState(Enum):
+    """Decoder state machine states"""
+    EXPECT_START = "start"
+    EXPECT_LENGTH = "length"
+    EXPECT_START2 = "start2"
+    EXPECT_C_FIELD = "c_field"
+    EXPECT_A_FIELD = "a_field"
+    EXPECT_CI_FIELD = "ci_field"
+    EXPECT_PAYLOAD = "payload"
+    EXPECT_CHECKSUM = "checksum"
+    EXPECT_STOP = "stop"
+    COMPLETE = "complete"
+
+class FrameType(Enum):
+    """M-Bus frame types"""
+    ACK = 0xE5
+    SHORT = 0x10
+    LONG = 0x68
+    ANY = "any"  # For flexible response handling
 ```
-Start | L-Field | L-Field | Start | C-Field | A-Field | CI-Field | Data | Checksum | Stop
-0x68  | Length  | Length  | 0x68  | Control | Address | App Code | ...  | Sum      | 0x16
+
+#### Data Structures
+```python
+@dataclass
+class Telegram:
+    """Base class for all decoded telegrams"""
+    address: int
+    telegram_type: TelegramType
+
+@dataclass
+class ACKTelegram(Telegram):
+    """Single character ACK (E5h)"""
+    pass
+
+@dataclass
+class ShortFrameTelegram(Telegram):
+    """Short frame (control without data)"""
+    c_field: int
+
+@dataclass
+class UserDataTelegram(Telegram):
+    """RSP-UD telegram with application data"""
+    ci_field: int
+    status: StatusByte
+    records: list[DataRecord]
+    has_more_telegrams: bool  # Critical for multi-telegram handling!
+    manufacturer_data: bytes | None
+
+@dataclass
+class DataRecord:
+    """Single M-Bus data record (DIF + VIF + Data)"""
+    dif: int
+    dife: list[int]
+    vif: int
+    vife: list[int]
+    data: bytes
+    # Parsed values (to be added later)
+    # value: Any
+    # unit: str
+    # description: str
 ```
-- Data transmission with variable payload (3-252 bytes)
-- Most common for meter data responses
 
-### Frame Fields Explained
-- **L-Field**: Data length (excludes start, length, and stop bytes)
-- **C-Field**: Control information (direction, function, frame count bit)
-- **A-Field**: Primary address (1-250, or 0 for broadcast)
-- **CI-Field**: Application layer control information
-- **Checksum**: Arithmetic sum of all bytes from C-Field to last data byte
+### Session Layer Integration
 
-## Application Layer - Data Structures
+How Session layer uses the progressive decoder:
 
-The application layer defines how measurement data is encoded and transmitted.
+```python
+# In Session Layer
+async def _receive_telegram(
+    self,
+    expected_address: int | None = None,
+    allowed_types: set[FrameType] | None = None
+) -> Telegram:
+    """
+    Receive and decode a telegram progressively.
 
-### Fixed Data Structure
-Standardized 4-byte format for basic meter values:
-- **Identification Number**: 32-bit BCD encoded
-- **Access Number**: Sequential counter (0-255)
-- **Status**: Device status flags
-- **Medium and Unit**: Type of measurement
+    Args:
+        expected_address: Expected device address (validates A-field)
+        allowed_types: Allowed frame types (e.g., {ACK, ERROR})
 
-### Variable Data Structure (Most Common)
-Flexible format allowing multiple measurements in one telegram:
+    Returns:
+        Decoded telegram
 
-#### Data Information Field (DIF)
-- **Function**: Instantaneous, maximum, minimum, error state
-- **Data Type**: Integer, real, string, date, etc.
-- **Storage Number**: Tariff register (0=current, 1-15=historical)
-- **Extension**: Indicates if more DIF bytes follow
+    Raises:
+        MBusTimeoutError: If any read times out
+        MBusProtocolError: If validation fails
+    """
+    # Create decoder
+    decoder = TelegramDecoder(
+        expected_address=expected_address,
+        allowed_types=allowed_types
+    )
 
-#### Value Information Field (VIF)
-- **Unit**: Physical unit (Wh, m³, °C, W, etc.)
-- **Multiplier**: Scaling factor (×10⁻³ to ×10⁶)
-- **Extension**: Manufacturer-specific or alternative units
+    # Progressive read loop
+    while not decoder.is_complete():
+        bytes_needed = decoder.bytes_needed()
 
-#### Data Format Example
+        # Read from transport (may timeout and return empty bytes)
+        data = await self.transport.read(bytes_needed)
+
+        if not data:
+            # Timeout - Session handles retry
+            raise MBusTimeoutError("No response from device")
+
+        try:
+            # Feed to decoder - validates immediately
+            decoder.feed(data)
+        except MBusProtocolError as e:
+            # Validation failed - Session will retry entire sequence
+            raise
+
+    # Get complete telegram
+    return decoder.get_telegram()
 ```
-DIF | VIF | Data | DIF | VIF | Data | ...
-04  | 13  | 1234 | 02  | 5B  | 20   | ...
+
+### Error Handling Strategy
+
+**Protocol Layer Responsibility:**
+- Validate data immediately as it's fed
+- Throw `MBusProtocolError` on any validation failure
+- Does NOT handle retries - that's Session layer's job
+
+**Session Layer Responsibility:**
+- Catch `MBusProtocolError` and `MBusTimeoutError`
+- Retry entire sequence from start (per M-Bus specification)
+- Clear any partial state before retry
+- Give up after max retries and propagate error to Master layer
+
+**Example Error Scenarios:**
+
+1. **Checksum error**: Protocol throws error → Session retries entire request
+2. **Wrong frame type**: Protocol throws error → Session retries (might be corruption)
+3. **Timeout reading**: Transport returns empty bytes → Session retries
+4. **Wrong address**: Protocol throws error → Session retries or fails (depends on config)
+5. **L-field mismatch**: Protocol throws error → Session retries
+
+**Flexible Response Handling:**
+
+Some M-Bus operations can receive multiple response types. For example, after SND_NKE:
+- Normal case: ACK (0xE5)
+- Error case: Error telegram
+
+Session layer can specify allowed types:
+```python
+telegram = await self._receive_telegram(
+    expected_address=5,
+    allowed_types={FrameType.ACK, FrameType.SHORT}  # Accept both
+)
+
+if isinstance(telegram, ACKTelegram):
+    # Success
+    return True
+else:
+    # Handle error telegram
+    return False
 ```
-- DIF 04: 32-bit integer, storage 0, instantaneous
-- VIF 13: Energy in Wh × 10⁻³ (= Wh)
-- Data: 0x1234 = 4660 Wh
-- DIF 02: 16-bit integer, storage 0, instantaneous
-- VIF 5B: Flow temperature in °C
-- Data: 0x20 = 32°C
 
-### Common Measurement Types
-- **Energy**: Wh, kWh, MWh, GJ, MJ
-- **Volume**: m³, l (water, gas)
-- **Mass**: kg, t
-- **Power**: W, kW, MW
-- **Flow rates**: m³/h, l/h, kg/h
-- **Temperature**: °C (flow, return, difference)
-- **Time/Date**: Timestamps for readings
-- **Pressure**: bar, Pa
-- **Voltage/Current**: V, A (for electrical meters)
+### Design Notes
+- **Progressive validation**: Each byte/field validated immediately as received
+- **State machine**: Decoder maintains internal state, Session just feeds bytes
+- **Fail fast**: Error detection happens as early as possible
+- **No retry in Protocol**: Protocol only validates, Session handles retries per M-Bus spec
+- **Flexible responses**: Decoder can accept multiple frame types when needed
+- **Checksum at end**: Only validated after complete frame received
+- **Multi-telegram detection**: Parse `has_more_telegrams` flag in status byte
 
-## Network Layer - Addressing
+### Decoder Architecture
 
-### Primary Addressing
-**Direct communication** using 1-byte address:
-- Address range: 1-250 (0 = broadcast, 255 = invalid)
-- Fast and simple for known meter locations
-- Address must be pre-configured in each meter
+**Single Decoder Interface**:
+- Session layer uses one `TelegramDecoder` class
+- Decoder handles all frame types (ACK, Short, Long)
+- Session can specify allowed frame types (e.g., `{ACK, LONG}`)
 
-### Secondary Addressing
-**Identification-based** using 8-byte meter ID:
-- **Manufacturer ID**: 2 bytes (3-letter code encoded)
-- **Serial number**: 4 bytes (BCD or binary)
-- **Version**: 1 byte (firmware/hardware version)
-- **Medium type**: 1 byte (electricity, gas, water, heat, etc.)
+**Internal Implementation**:
+- Internally, decoder can delegate to specialized handlers for each frame type
+- ACK handling, Short frame handling, Long frame handling
+- This is an internal detail hidden from Session layer
 
-Example secondary address: `KAM 12345678 V01 Heat`
+**Benefits**:
+- Simple Session layer code - one decoder for all cases
+- Session can express "expect ACK or Error" easily
+- Internal specialization keeps code organized
 
-### Wildcard Searching
-Master can discover unknown devices using partial addresses:
-- Use 0xF as wildcard in any position
-- Example: `??? ???????? ??? Heat` finds all heat meters
-- Enables automatic device discovery on installation
+### Multi-Telegram Detection
+According to M-Bus specification, a device can indicate more data is available:
+- Status byte (in Variable Data Structure) contains "DIF_MORE_RECORDS_FOLLOW" flag
+- When parsing UserDataTelegram, extract this flag
+- Session layer checks `has_more_telegrams` flag and automatically sends additional REQ_UD2
+- All records from all telegrams are collected and returned together
 
-### Selection Process
-1. Master sends SELECT with secondary address/wildcard
-2. Matching slaves prepare to respond to primary address 0xFD
-3. Master can then communicate using primary address 0xFD
-4. After communication, slaves return to normal state
+---
 
-## Communication Procedures
+## Layer 3: Session Layer
 
-### Standard Data Collection Process
-1. **Reset**: Master sends SND_NKE (reset) to slave
-2. **Acknowledge**: Slave responds with ACK (0xE5)
-3. **Request**: Master requests data with REQ_UD2
-4. **Response**: Slave sends RSP_UD telegram with measurements
-5. **Confirm**: Master acknowledges with ACK
+**File**: `session.py`
+**Status**: 🚧 To be implemented
 
-### Frame Count Bit (FCB) Mechanism
-- **Alternating bit** in C-Field ensures data integrity
-- Master toggles FCB with each new request
-- Slave compares FCB to detect retransmissions
-- Prevents duplicate data processing
+### Responsibility
+Orchestrate communication flow between master and slaves. Handles telegram sequencing, retries, error recovery, and multi-telegram sequences.
 
-### Error Handling
-- **Timeouts**: No response within defined time
-- **Checksum errors**: Invalid frame structure
-- **FCB mismatch**: Frame sequence errors
-- **Collision detection**: Multiple slaves responding
+### Key Responsibilities
+1. **Send telegrams**: Use Transport to send bytes (encoded by Protocol)
+2. **Receive telegrams**: Read bytes from Transport, decode with Protocol
+3. **Retry logic**: Handle timeouts, retries on failure
+4. **Multi-telegram handling**: Automatically request additional telegrams when indicated
+5. **Error recovery**: Clean up state on failures
+6. **Sequencing**: Ensure correct order (e.g., reset before first read)
 
-### Bus Collision Avoidance
-- Only master initiates communication
-- Slaves respond only when directly addressed
-- Built-in delays prevent bus conflicts
-- Collision detection through current monitoring
+### Key Classes
 
-## Implementation Insights
+```python
+class MBusSession:
+    """
+    Orchestrates M-Bus communication with retry logic and error handling.
 
-### From pyMeterBus (Python Implementation)
-**Strengths:**
-- Focus on telegram parsing and serial communication
-- JSON output for easy integration
-- Support for both fixed and variable data structures
-- Heat/cooling meter specialization
-- Good documentation and examples
+    Responsibilities:
+    - Send telegrams and receive responses
+    - Progressive telegram decoding (feed bytes to decoder)
+    - Retry logic per M-Bus specification
+    - Multi-telegram sequence handling
+    - Error recovery
+    """
 
-**Architecture:**
-- Modular design with separate parsing components
-- Event-driven telegram processing
-- Support for multiple transport layers
+    # Dependencies
+    transport: Transport
+    encoder: TelegramEncoder
 
-### From libmbus (C Library Implementation)
-**Strengths:**
-- Low-level frame handling and protocol implementation
-- Comprehensive error handling and recovery
-- Support for multiple communication interfaces
-- Production-ready reliability and performance
-- Cross-platform compatibility
+    # Configuration
+    max_retries: int
+    retry_delay: float
+    base_timeout: float
 
-**Architecture:**
-- Layered protocol stack
-- State machine for connection management
-- Memory-efficient data structures
+    def __init__(
+        self,
+        transport: Transport,
+        max_retries: int = 3,
+        retry_delay: float = 0.1,
+        base_timeout: float = 0.5
+    ):
+        """Initialize session with transport and configuration"""
+        self.transport = transport
+        self.encoder = TelegramEncoder()
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.base_timeout = base_timeout
 
-### Key Implementation Considerations
-1. **Timing sensitivity**: M-Bus has strict timing requirements
-2. **Bus power management**: Slaves may lose power during communication
-3. **Noise tolerance**: Industrial environments require robust error handling
-4. **Device diversity**: Wide variety of meter types and manufacturers
-5. **Backward compatibility**: Support for older meter firmware
+    # High-level operations
+    async def reset_device(self, address: int) -> bool:
+        """
+        Send SND_NKE and wait for ACK with retries.
 
-## Protocol Features & Benefits
+        Flow:
+        1. Encode SND_NKE telegram
+        2. Send and receive ACK (with retries)
+        3. Return True if ACK, False if max retries exceeded
 
-### Self-Describing Data
-- **VIF codes** make telegrams interpretable without external configuration
-- Units and scaling factors embedded in the data
-- Future-proof for new measurement types
+        Returns:
+            True if device acknowledged reset, False otherwise
+        """
+        request = self.encoder.encode_snd_nke(address)
 
-### Robust Error Detection
-- **Checksum validation** on every frame
-- **Frame count verification** prevents duplicates
-- **Timeout mechanisms** handle non-responsive devices
-- **Retransmission protocols** ensure data delivery
+        for attempt in range(self.max_retries):
+            try:
+                # Send request
+                await self.transport.write(request)
 
-### Flexible Addressing
-- **Primary addressing** for performance
-- **Secondary addressing** for flexibility
-- **Wildcard discovery** for automatic installation
-- **Multi-drop capability** up to 250 devices
+                # Receive response (ACK expected)
+                telegram = await self._receive_telegram(
+                    expected_address=address,
+                    allowed_types={FrameType.ACK}
+                )
 
-### Power Efficiency
-- **Bus-powered operation** eliminates external power
-- **Low current consumption** for battery-operated devices
-- **Sleep modes** for energy conservation
+                return True  # Got ACK
 
-### Standardized Implementation
-- **European standard EN 13757-2** ensures compatibility
-- **Comprehensive unit coding** system covers all measurement types
-- **Manufacturer independence** through standardized protocols
-- **Interoperability** between different vendor devices
+            except (MBusTimeoutError, MBusProtocolError):
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(self.retry_delay)
+                    continue
+                return False  # Max retries exceeded
 
-## Real-World Applications
+    async def read_user_data(self, address: int) -> list[DataRecord]:
+        """
+        Read all data records from device.
 
-### Residential Metering
-- Multi-apartment buildings with centralized reading
-- Individual meter monitoring for energy management
-- Automatic meter reading (AMR) systems
+        Handles multi-telegram sequences automatically:
+        - Sends REQ_UD2
+        - Receives RSP_UD telegram
+        - Checks has_more_telegrams flag
+        - If True: sends another REQ_UD2 for next telegram
+        - Collects all records from all telegrams
 
-### Commercial/Industrial
-- Factory energy monitoring and submetering
-- District heating/cooling networks
-- Water distribution system monitoring
+        Returns:
+            All data records from all telegrams
 
-### Smart Grid Integration
-- Building energy management systems (BEMS)
-- Demand response applications
-- Energy efficiency monitoring
+        Raises:
+            MBusTimeoutError: If device doesn't respond after retries
+            MBusProtocolError: If validation fails after retries
+        """
+        all_records = []
 
-### Use in Home Assistant
-This protocol understanding directly supports the pyMBusMaster library design:
-- **Async operation** prevents blocking Home Assistant
-- **Multiple meter support** for comprehensive monitoring
-- **Automatic discovery** simplifies configuration
-- **Standardized data format** enables consistent entity creation
-- **Error resilience** maintains system stability
+        while True:
+            # Request data
+            request = self.encoder.encode_req_ud2(address)
 
-## Technical Challenges & Solutions
+            # Send and receive with retries
+            telegram = await self._send_and_receive(
+                request=request,
+                expected_address=address,
+                allowed_types={FrameType.LONG}  # RSP_UD is long frame
+            )
 
-### Challenge: Bus Timing
-**Problem**: M-Bus requires precise timing between request and response
-**Solution**: Implement hardware-accurate timeouts and retry mechanisms
+            # Telegram must be UserDataTelegram
+            if not isinstance(telegram, UserDataTelegram):
+                raise MBusProtocolError(
+                    f"Expected UserDataTelegram, got {type(telegram)}"
+                )
 
-### Challenge: Device Diversity
-**Problem**: Different manufacturers implement protocol variations
-**Solution**: Comprehensive testing with real devices and fallback parsing
+            # Collect records
+            all_records.extend(telegram.records)
 
-### Challenge: Error Recovery
-**Problem**: Communication errors can leave bus in inconsistent state
-**Solution**: State machine with proper reset sequences and error detection
+            # Check for more telegrams
+            if not telegram.has_more_telegrams:
+                break  # Done
 
-### Challenge: Concurrent Access
-**Problem**: Multiple applications accessing the same bus cause collisions
-**Solution**: Bus locking mechanism ensures sequential access (implemented in pyMBusMaster)
+        return all_records
 
-## Summary
+    # Core private methods
+    async def _send_and_receive(
+        self,
+        request: bytes,
+        expected_address: int | None = None,
+        allowed_types: set[FrameType] | None = None
+    ) -> Telegram:
+        """
+        Send request and receive response with retry logic.
 
-M-Bus is a mature, standardized protocol that enables reliable utility meter communication over a simple two-wire interface. Its self-describing data format, flexible addressing, and robust error handling make it ideal for both simple residential installations and complex industrial monitoring systems.
+        Implements M-Bus retry strategy:
+        - Try up to max_retries times
+        - On timeout: retry
+        - On protocol error: retry (might be transmission corruption)
+        - After max retries: raise last exception
 
-The protocol's design principles of simplicity, reliability, and standardization align perfectly with the goals of the pyMBusMaster library - providing a modern, async Python interface while maintaining compatibility with the extensive ecosystem of M-Bus devices deployed worldwide.
+        Args:
+            request: Encoded telegram bytes to send
+            expected_address: Expected device address
+            allowed_types: Allowed response frame types
 
-Understanding these protocol fundamentals is essential for implementing a robust M-Bus master that can handle the diversity and complexity of real-world meter installations while providing a simple, reliable interface for applications like Home Assistant.
+        Returns:
+            Decoded telegram
+
+        Raises:
+            MBusTimeoutError: After max retries with timeouts
+            MBusProtocolError: After max retries with validation errors
+        """
+        last_exception = None
+
+        for attempt in range(self.max_retries):
+            try:
+                # Send request
+                await self.transport.write(request)
+
+                # Receive response progressively
+                telegram = await self._receive_telegram(
+                    expected_address=expected_address,
+                    allowed_types=allowed_types
+                )
+
+                return telegram  # Success!
+
+            except (MBusTimeoutError, MBusProtocolError) as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    # Wait before retry
+                    await asyncio.sleep(self.retry_delay)
+                    continue
+                # Max retries exceeded - raise last exception
+                raise last_exception
+
+    async def _receive_telegram(
+        self,
+        expected_address: int | None = None,
+        allowed_types: set[FrameType] | None = None
+    ) -> Telegram:
+        """
+        Receive and decode telegram progressively.
+
+        Creates decoder and feeds it bytes in small chunks until complete.
+        Decoder validates each chunk immediately.
+
+        Args:
+            expected_address: Expected device address (None = any)
+            allowed_types: Allowed frame types (None = any)
+
+        Returns:
+            Decoded telegram
+
+        Raises:
+            MBusTimeoutError: If any read times out
+            MBusProtocolError: If validation fails
+        """
+        # Create decoder with expectations
+        decoder = TelegramDecoder(
+            expected_address=expected_address,
+            allowed_types=allowed_types
+        )
+
+        # Progressive read loop
+        while not decoder.is_complete():
+            # Decoder tells us how many bytes it needs
+            bytes_needed = decoder.bytes_needed()
+
+            # Read from transport with timeout
+            data = await self.transport.read(
+                bytes_needed,
+                protocol_timeout=self.base_timeout
+            )
+
+            if not data:
+                # Timeout (transport returns empty bytes)
+                raise MBusTimeoutError(
+                    f"Timeout reading {bytes_needed} bytes "
+                    f"(state: {decoder._state})"
+                )
+
+            # Feed to decoder - validates immediately
+            try:
+                decoder.feed(data)
+            except MBusProtocolError:
+                # Validation failed - re-raise for retry logic
+                raise
+
+        # Get complete validated telegram
+        return decoder.get_telegram()
+```
+
+### Configuration
+
+Configuration is passed to Session constructor:
+
+```python
+session = MBusSession(
+    transport=transport,
+    max_retries=3,          # Number of retry attempts
+    retry_delay=0.1,        # Seconds to wait between retries
+    base_timeout=0.5        # Base timeout for first byte response
+)
+```
+
+Per M-Bus specification, the master should retry on:
+- Timeout (no response)
+- Checksum errors (transmission corruption)
+- Invalid frame structure (might be corruption)
+
+### Error Handling Strategy
+
+**Retry on These Errors:**
+- `MBusTimeoutError`: Device didn't respond in time
+- `MBusProtocolError`: Validation failed (checksum, frame structure, etc.)
+
+**Don't Retry on These:**
+- `MBusConnectionError`: Transport layer failure (connection lost)
+
+**Retry Logic:**
+1. Try to send and receive
+2. On error: Wait `retry_delay` seconds
+3. Try again (up to `max_retries` attempts)
+4. After max retries: Raise the last exception to Master layer
+
+**Progressive Decoding Error Flow:**
+```
+Attempt 1:
+  Send REQ_UD2
+  Read 1 byte → 0x68 ✓
+  Read 2 bytes → 0x1F 0x1F ✓
+  Read 1 byte → 0x68 ✓
+  Read 1 byte → 0x08 ✓
+  ...
+  Read 1 byte → Checksum ✗ MBusProtocolError!
+
+Wait retry_delay...
+
+Attempt 2:
+  Send REQ_UD2 (entire sequence from start)
+  Read 1 byte → 0x68 ✓
+  ...
+  Complete successfully ✓
+```
+
+### Design Notes
+- **Stateful orchestration**: Session tracks operations in progress
+- **Protocol layer is stateless**: Create new decoder for each telegram
+- **Retry entire sequence**: On error, start from the beginning (send request again)
+- **Progressive reading**: Feed decoder byte-by-byte as needed
+- **Multi-telegram transparency**: Upper layers don't know about multiple telegrams
+- **Configurable behavior**: Retries, delays, timeouts all configurable
+
+---
+
+## Layer 4: Master API
+
+**File**: `master.py`
+**Status**: 🚧 To be implemented
+
+### Responsibility
+Provide a simple, user-friendly API that hides all complexity. Users should be able to read meter data with a single method call.
+
+### Key Features
+- Simple one-line meter reading
+- Connection lifecycle management
+- Friendly error messages
+- Convenient data structures for results
+- Context manager support
+
+### Main Class
+```python
+class MBusMaster:
+    """
+    High-level M-Bus master interface.
+
+    Example usage:
+        async with MBusMaster("/dev/ttyUSB0") as master:
+            data = await master.read_meter(5)
+            print(f"Energy: {data.get_value('Energy')}")
+    """
+
+    def __init__(self, url: str, **kwargs):
+        """
+        Initialize M-Bus master.
+
+        Args:
+            url: Connection URL (serial port, socket://host:port, etc.)
+            **kwargs: Transport parameters (baudrate, etc.)
+        """
+
+    async def connect(self) -> None:
+        """Open connection to M-Bus"""
+
+    async def disconnect(self) -> None:
+        """Close connection to M-Bus"""
+
+    async def read_meter(self, address: int) -> MeterData:
+        """
+        Read all data from a meter (main use case).
+
+        Performs complete read sequence:
+        1. Reset device (SND_NKE)
+        2. Read all data (REQ_UD2, handles multi-telegram automatically)
+        3. Return parsed data in friendly format
+
+        Args:
+            address: Primary address (0-250)
+
+        Returns:
+            MeterData object with all records
+
+        Raises:
+            MBusConnectionError: If not connected
+            MBusTimeoutError: If device doesn't respond
+            MBusProtocolError: If communication fails
+        """
+```
+
+### Result Data Structure
+```python
+@dataclass
+class MeterData:
+    """Friendly representation of meter data"""
+    address: int
+    records: list[DataRecord]
+
+    def get_value(self, description: str) -> Any:
+        """Get value by description (e.g., 'Energy', 'Volume')"""
+
+    def get_all_values(self) -> dict[str, Any]:
+        """Get all values as dictionary"""
+```
+
+### Design Notes
+- Hides all complexity from users
+- Provides sensible defaults
+- Context manager support for automatic cleanup
+- All methods are async (consistent with library design)
+- Future expansion: scan_devices(), select_device() for secondary addressing
+
+---
+
+## Complete Data Flow Example: read_meter()
+
+This example shows the complete flow through all layers with progressive decoding:
+
+```
+User calls: master.read_meter(address=5)
+  ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 4: Master (master.py)                                     │
+│                                                                  │
+│  1. Validate connection state                                   │
+│  2. Call: session.reset_device(5)                               │
+│  3. Call: session.read_user_data(5)                             │
+│  4. Wrap result in MeterData                                    │
+│  5. Return to user                                              │
+└─────────────────────────────────────────────────────────────────┘
+  ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 3: Session (session.py)                                   │
+│                                                                  │
+│ reset_device(5):                                                │
+│   1. encoder.encode_snd_nke(5) → bytes                          │
+│   2. transport.write(bytes)                                     │
+│   3. _receive_telegram():                                       │
+│      - Create TelegramDecoder(expected_address=5)               │
+│      - Loop: bytes_needed = decoder.bytes_needed()              │
+│              data = transport.read(bytes_needed)                │
+│              decoder.feed(data)  # validates!                   │
+│      - telegram = decoder.get_telegram()                        │
+│   4. Return True if ACK                                         │
+│                                                                  │
+│ read_user_data(5):                                              │
+│   Loop until has_more_telegrams == False:                       │
+│     1. encoder.encode_req_ud2(5) → bytes                        │
+│     2. _send_and_receive():                                     │
+│        - transport.write(bytes)                                 │
+│        - _receive_telegram() [progressive!]                     │
+│     3. Collect telegram.records                                 │
+│     4. Check telegram.has_more_telegrams                        │
+│   Return all collected records                                  │
+│                                                                  │
+│ Retry logic: On error, retry entire sequence up to 3 times     │
+└─────────────────────────────────────────────────────────────────┘
+  ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 2: Protocol (protocol.py)                                 │
+│                                                                  │
+│ TelegramEncoder (stateless):                                    │
+│   - encode_snd_nke(5) → bytes [10 40 05 45 16]                  │
+│   - encode_req_ud2(5) → bytes [10 5B 05 60 16]                  │
+│                                                                  │
+│ TelegramDecoder (state machine):                                │
+│   Progressive decoding with immediate validation:               │
+│                                                                  │
+│   State: EXPECT_START                                           │
+│     bytes_needed() → 1                                          │
+│     feed(0x68) → validate START, advance to EXPECT_LENGTH       │
+│                                                                  │
+│   State: EXPECT_LENGTH                                          │
+│     bytes_needed() → 2                                          │
+│     feed(0x1F 0x1F) → validate L-fields match, advance          │
+│                                                                  │
+│   State: EXPECT_START2                                          │
+│     bytes_needed() → 1                                          │
+│     feed(0x68) → validate second START, advance                 │
+│                                                                  │
+│   ... continues for C, A, CI fields, payload, checksum ...      │
+│                                                                  │
+│   State: COMPLETE                                               │
+│     get_telegram() → UserDataTelegram with parsed records       │
+│                                                                  │
+│ If validation fails at ANY step: raise MBusProtocolError        │
+└─────────────────────────────────────────────────────────────────┘
+  ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 1: Transport (transport.py)                               │
+│                                                                  │
+│ write(bytes):                                                   │
+│   - Clear input buffer                                          │
+│   - Send bytes to serial/TCP                                    │
+│                                                                  │
+│ read(size, timeout):                                            │
+│   - Calculate total timeout (base + transmission time)          │
+│   - Read exactly 'size' bytes                                   │
+│   - Return bytes or empty on timeout                            │
+│                                                                  │
+│ No knowledge of M-Bus protocol or telegram structure            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Progressive Decoding Example (Long Frame with Multi-Telegram)
+
+```
+Session: Send REQ_UD2 to address 5
+Session: Create decoder, start progressive read
+
+Decoder: bytes_needed() → 1
+Transport: read(1) → 0x68
+Decoder: feed(0x68) → ✓ Long frame START, state → EXPECT_LENGTH
+
+Decoder: bytes_needed() → 2
+Transport: read(2) → 0x1F 0x1F
+Decoder: feed(0x1F 0x1F) → ✓ L-fields match (31 bytes), state → EXPECT_START2
+
+Decoder: bytes_needed() → 1
+Transport: read(1) → 0x68
+Decoder: feed(0x68) → ✓ Second START, state → EXPECT_C_FIELD
+
+Decoder: bytes_needed() → 1
+Transport: read(1) → 0x08
+Decoder: feed(0x08) → ✓ C-field (RSP_UD), state → EXPECT_A_FIELD
+
+Decoder: bytes_needed() → 1
+Transport: read(1) → 0x05
+Decoder: feed(0x05) → ✓ Address matches expected, state → EXPECT_CI_FIELD
+
+... continues reading CI-field, status, data records ...
+
+Decoder: bytes_needed() → 1
+Transport: read(1) → 0xAB (checksum)
+Decoder: feed(0xAB) → ✓ Checksum valid, state → EXPECT_STOP
+
+Decoder: bytes_needed() → 1
+Transport: read(1) → 0x16
+Decoder: feed(0x16) → ✓ STOP byte, state → COMPLETE
+
+Decoder: is_complete() → True
+Decoder: get_telegram() → UserDataTelegram(
+    address=5,
+    ci_field=0x72,
+    status=StatusByte(has_more=True),  ← MORE DATA AVAILABLE!
+    records=[...],
+    has_more_telegrams=True
+)
+
+Session: Check has_more_telegrams → True
+Session: Send another REQ_UD2 to get next telegram...
+Session: Repeat progressive decoding...
+Session: Eventually has_more_telegrams → False
+Session: Return all collected records to Master
+```
+
+---
+
+## Implementation Scope
+
+### What We're Implementing (Phase 1-3)
+
+**Primary Goal**: Safely read data from M-Bus meters
+
+**Supported**:
+- Primary addressing (0-250, including broadcast 0xFF)
+- Variable Data Structure (CI-field values from EN 13757-3:2018)
+- Telegram types: ACK, Short Frame, Long Frame
+- Data record types: All from Table 4 (integers, BCD, real, variable length, etc.)
+- Multi-telegram sequences
+- Error handling per M-Bus specification
+- No encryption (plain text communication)
+
+**Not in Initial Scope** (can be added in Phase 4):
+- Sending data TO meters (only reading FROM meters)
+- Secondary addressing (12-digit ID selection)
+- Encrypted communication (AES)
+- Baud rate switching
+- Advanced features: alarm polling, clock sync, device discovery
+
+**Note on Features**: As we develop, we may add features like clock synchronization if they're straightforward and useful. The scope is flexible based on what's needed for reliable meter reading.
+
+### Important: Old vs Current Specifications
+
+**Current Spec**: EN 13757-3:2018 (in `reference/EN 13757-3 2018 specs/`)
+- This is what we implement
+
+**Old Specs**: EN 13757-3 older versions (in `reference/Original specs (out of date)/`)
+- Included for reference only
+- Help understand why current spec is designed this way
+- **DO NOT implement outdated features**
+
+**Examples of outdated terminology**:
+- "Control Frames" → Now called "Long Frames without user data"
+- "Fixed Data Structure" → Removed in 2018 spec, use Variable Data Structure
+- "Mode 2" → Phased out in 2018 spec
+- Old CI-field values → Use 2018 values only
+
+---
+
+## Implementation Phases
+
+### Phase 1: Protocol Layer (Foundation)
+**Goal**: Implement encoding, decoding, and validation
+
+Tasks:
+- Extract M-Bus constants from specification to `constants.py`
+- Define telegram data structures (Telegram, ACKTelegram, UserDataTelegram, etc.)
+- Implement encoding functions (SND_NKE, REQ_UD2, etc.)
+- Implement decoding functions (parse frames, validate checksums)
+- Implement data record parsing (DIF, VIF, data extraction)
+
+**Success criteria**: Can encode/decode all basic telegram types (tested with real hardware)
+
+---
+
+### Phase 2: Session Layer (Orchestration)
+**Goal**: Implement communication flow and retry logic
+
+Tasks:
+- Implement MBusSession class
+- Implement reset_device() with retries
+- Implement read_user_data() with multi-telegram support
+- Add error recovery logic per M-Bus specification
+
+**Success criteria**: Can perform complete read sequence with multi-telegram handling (tested with real hardware)
+
+---
+
+### Phase 3: Master API (User Interface)
+**Goal**: Provide simple, user-friendly API
+
+Tasks:
+- Implement MBusMaster class
+- Implement read_meter() convenience method
+- Add MeterData result wrapper
+- Add context manager support
+
+**Success criteria**: Users can read meter data with single method call (tested with real hardware)
+
+---
+
+### Phase 4: Advanced Features (Future)
+Optional features to add later:
+- Secondary addressing (device selection by ID)
+- Alarm reading (REQ_UD1)
+- Device scanning/discovery
+- Baud rate switching
+- Clock synchronization
+- Encrypted communication (AES)
+
+---
+
+## Testing Strategy
+
+### Development Testing (During Implementation)
+
+**Approach**: Test frequently with real hardware during development
+- Use physical M-Bus gateway for testing
+- Manual verification of results by developer
+- Rapid iteration and debugging with real devices
+- Test file: `dev_mbus_test.py` (not committed to git)
+
+**Benefits**:
+- Ensures implementation works with real devices
+- Catches protocol issues early
+- Validates assumptions against actual hardware
+- Quick feedback loop
+
+### Formal Unit/Integration Tests (At the End)
+
+**Unit Tests** (fast, no I/O):
+- Protocol layer: Test encoding/decoding with known test vectors
+- Session layer: Test with mocked Transport
+- Master layer: Test with mocked Session
+
+**Integration Tests** (slower, uses I/O):
+- Transport layer: Already tested ✅
+- Session + Protocol: Test with mocked connections
+- Full stack: Test with simulated M-Bus devices
+
+**Test Data Sources**:
+- Examples from EN 13757-3:2018 specification
+- Real device captures from `reference/` directory
+- Synthetic test cases for edge cases
+
+### Test File Management
+
+- Main development testing: `dev_mbus_test.py` (not in git)
+- Keep temporary test files to minimum
+- Clean up when done
+- Formal tests in `tests/` directory added at the end
+
+---
+
+## Key Design Decisions Summary
+
+### Progressive Decoding ✅
+**Decision**: Read and validate telegrams progressively, byte-by-byte
+- Decoder maintains internal state machine
+- Session feeds bytes in small chunks (1-2 at a time)
+- Validation happens immediately after each read
+- Fail fast on any error
+
+**Benefits**: Early error detection, efficient bandwidth use, clear state tracking
+
+### Error Handling Strategy ✅
+**Decision**: Protocol layer validates only, Session layer handles retries
+- Protocol throws `MBusProtocolError` on validation failure
+- Session catches errors and retries entire sequence (per M-Bus spec)
+- Configurable retry count and delay
+- Clean separation of concerns
+
+**Benefits**: Simple Protocol layer testing, flexible retry logic, matches M-Bus specification
+
+### Multi-Telegram Handling ✅
+**Decision**: Session layer automatically handles multi-telegram sequences
+- Protocol layer parses `has_more_telegrams` flag from status byte
+- Session checks flag and sends additional REQ_UD2 automatically
+- All records collected and returned together
+- Transparent to Master layer
+
+**Benefits**: Simple Master API, complete data retrieval, follows M-Bus standard
+
+### Flexible Response Types ✅
+**Decision**: Decoder can accept multiple telegram types when needed
+- `allowed_types` parameter lets Session specify acceptable responses
+- Example: After SND_NKE, accept either ACK or Error telegram
+- Decoder validates against allowed types and throws error if mismatch
+
+**Benefits**: Handles M-Bus spec variations, robust error handling
+
+### Layer Boundaries ✅
+**Decision**: Strict separation of responsibilities
+- **Transport**: Byte I/O only, no protocol knowledge
+- **Protocol**: Stateless encode/decode/validate (except decoder state machine)
+- **Session**: Stateful orchestration, retry logic, multi-telegram
+- **Master**: Simple user API
+
+**Benefits**: Easy testing, clear responsibilities, maintainable code
+
+---
+
+## Implementation Notes
+
+### Decisions Made During Development
+
+**Resolved**:
+- ~~How to decode progressively?~~ ✅ State machine with `bytes_needed()` / `feed()` pattern
+- ~~How to handle retries?~~ ✅ Retry entire sequence, configurable count
+- ~~How to handle multi-telegram?~~ ✅ Automatic based on flag
+- ~~Decoder architecture?~~ ✅ Single decoder handling all frame types, internal delegation
+
+**To Be Decided During Implementation**:
+- **Checksum calculation**: Exact algorithm defined in EN 13757-2 specification
+- **Multi-telegram error handling**: Retry strategy defined in M-Bus specification
+- **Data record parsing approach**: Parse progressively (DIF → length → data) vs batch parse
+- **`has_more_telegrams` flag**: Location defined in specification, extract during implementation
+- **Manufacturer data length**: Determined from frame structure per specification
+- **Error telegram structure**: Defined in M-Bus specification, implement when needed
+
+**Future Considerations** (Phase 4):
+- Session device state caching
+- Device-specific quirk handling
+- Sync wrappers for non-async users
+- Advanced API exposure
+- Batch operations
+- Progress callbacks
+
+---
+
+## References
+
+- **EN 13757-3:2018**: M-Bus Application Layer specification (see `reference/EN 13757-3 2018 specs/`)
+- **EN 13757-2**: M-Bus Physical and Link Layer
+- **OMS Specification**: Open Metering System extensions (see `reference/OMS/`)
+
+---
+
+## Status and Next Steps
+
+### Completed ✅
+- **Architecture design**: 4-layer design with clear responsibilities
+- **Transport layer**: Fully implemented and tested
+- **Progressive decoding strategy**: State machine approach defined
+- **Error handling strategy**: Protocol validates, Session retries
+- **Multi-telegram handling**: Automatic collection via flag detection
+- **High-level API design**: All three layers (Protocol, Session, Master) outlined
+
+### Ready for Implementation
+
+The plan is now complete and ready for implementation. The next steps are:
+
+1. **Implement Protocol Layer**
+   - **M-Bus constants file** (`constants.py`) - Extract all protocol constants from spec
+   - `TelegramEncoder` class (simple, stateless)
+   - `TelegramDecoder` class (state machine)
+   - Telegram data structures (ACKTelegram, UserDataTelegram, etc.)
+   - Data record parsing (DIF/VIF/Data)
+
+2. **Implement Session Layer**
+   - `MBusSession` class
+   - `reset_device()` method
+   - `read_user_data()` method
+   - Retry logic with proper error handling
+   - Progressive telegram reception
+
+3. **Implement Master API**
+   - `MBusMaster` class
+   - `read_meter()` convenience method
+   - `MeterData` result wrapper
+   - Context manager support
+   - Connection lifecycle management
+
+### Implementation Order
+
+Follow the phases defined earlier:
+- **Phase 1**: Protocol Layer (foundation)
+- **Phase 2**: Session Layer (orchestration)
+- **Phase 3**: Master API (user interface)
+- **Phase 4**: Advanced features (optional, future)
+
+Each phase should be completed with unit tests before moving to the next phase.
