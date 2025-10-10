@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from src.mbusmaster.transport import MBusTransport
+from src.mbusmaster.transport import Transport
 
 
 class TimingMockServer:
@@ -64,7 +64,7 @@ class TimingMockServer:
                     await asyncio.sleep(delay)
 
                 # Send standard ACK response
-                writer.write(b"\xE5")
+                writer.write(b"\xe5")
                 await writer.drain()
 
                 request_count += 1
@@ -95,20 +95,22 @@ async def timing_server() -> AsyncGenerator[TimingMockServer]:
 class TestMBusTransportTiming:
     """Test MBusTransport timing behavior with real I/O."""
 
-    async def test_transmission_time_accuracy(self, timing_server: TimingMockServer) -> None:
+    async def test_transmission_time_accuracy(
+        self, timing_server: TimingMockServer
+    ) -> None:
         """Test that transmission time calculations are accurate."""
         # Test different baud rates and verify timing accuracy
         test_cases: list[dict[str, int | float]] = [
-            {"baudrate": 2400, "expected_time_per_byte": 11/2400},  # M-Bus standard
-            {"baudrate": 9600, "expected_time_per_byte": 11/9600},
-            {"baudrate": 19200, "expected_time_per_byte": 11/19200},
+            {"baudrate": 2400, "expected_time_per_byte": 11 / 2400},  # M-Bus standard
+            {"baudrate": 9600, "expected_time_per_byte": 11 / 9600},
+            {"baudrate": 19200, "expected_time_per_byte": 11 / 19200},
         ]
 
         for case in test_cases:
-            transport = MBusTransport(
+            transport = Transport(
                 f"socket://127.0.0.1:{timing_server.port}",
                 baudrate=int(case["baudrate"]),
-                transmission_multiplier=1.0
+                transmission_multiplier=1.0,
             )
 
             # Verify timeout calculation through practical timeout testing
@@ -120,7 +122,7 @@ class TestMBusTransportTiming:
             snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
             await transport.write(snd_nke)
             response = await transport.read(1, protocol_timeout=0.1)
-            assert response == b"\xE5"
+            assert response == b"\xe5"
 
             await transport.close()
 
@@ -128,10 +130,10 @@ class TestMBusTransportTiming:
         self, timing_server: TimingMockServer
     ) -> None:
         """Test that timeout calculation properly separates protocol and transmission time."""
-        transport = MBusTransport(
+        transport = Transport(
             f"socket://127.0.0.1:{timing_server.port}",
             baudrate=2400,
-            transmission_multiplier=1.2
+            transmission_multiplier=1.2,
         )
 
         await transport.open()
@@ -166,10 +168,10 @@ class TestMBusTransportTiming:
         test_multipliers = [1.0, 1.2, 1.5, 2.0]
 
         for multiplier in test_multipliers:
-            transport = MBusTransport(
+            transport = Transport(
                 f"socket://127.0.0.1:{timing_server.port}",
                 baudrate=2400,
-                transmission_multiplier=multiplier
+                transmission_multiplier=multiplier,
             )
 
             await transport.open()
@@ -177,7 +179,7 @@ class TestMBusTransportTiming:
             # Calculate expected timeout with this multiplier
             protocol_timeout = 0.05
             # For 1 byte at 2400 baud: (11 bits / 2400) = 0.00458s base
-            base_transmission = (11 / 2400)
+            base_transmission = 11 / 2400
             expected_total = protocol_timeout + (base_transmission * multiplier)
 
             # Force timeout by making server delay too long
@@ -202,10 +204,10 @@ class TestMBusTransportTiming:
         self, timing_server: TimingMockServer
     ) -> None:
         """Test behavior when protocol_timeout is 0.0."""
-        transport = MBusTransport(
+        transport = Transport(
             f"socket://127.0.0.1:{timing_server.port}",
             baudrate=9600,
-            transmission_multiplier=1.2
+            transmission_multiplier=1.2,
         )
 
         await transport.open()
@@ -225,7 +227,7 @@ class TestMBusTransportTiming:
         elapsed = time.time() - start_time
 
         # Should succeed within transmission timeout
-        assert response == b"\xE5"
+        assert response == b"\xe5"
         assert elapsed < expected_timeout
 
         await transport.close()
@@ -234,10 +236,10 @@ class TestMBusTransportTiming:
         self, timing_server: TimingMockServer
     ) -> None:
         """Test that timeouts scale correctly for larger frames."""
-        transport = MBusTransport(
+        transport = Transport(
             f"socket://127.0.0.1:{timing_server.port}",
             baudrate=2400,
-            transmission_multiplier=1.2
+            transmission_multiplier=1.2,
         )
 
         await transport.open()
@@ -271,10 +273,10 @@ class TestMBusTransportTiming:
 
     async def test_real_timing_precision(self, timing_server: TimingMockServer) -> None:
         """Test timing precision under real I/O conditions."""
-        transport = MBusTransport(
+        transport = Transport(
             f"socket://127.0.0.1:{timing_server.port}",
             baudrate=9600,
-            transmission_multiplier=1.0
+            transmission_multiplier=1.0,
         )
 
         await transport.open()
@@ -298,7 +300,7 @@ class TestMBusTransportTiming:
             request_times.append(mid - start)
             response_times.append(end - mid)
 
-            assert response == b"\xE5"
+            assert response == b"\xe5"
 
             # Small delay between requests
             await asyncio.sleep(0.01)
@@ -317,10 +319,10 @@ class TestMBusTransportTiming:
 
     async def test_timeout_edge_cases(self, timing_server: TimingMockServer) -> None:
         """Test edge cases in timeout calculations."""
-        transport = MBusTransport(
+        transport = Transport(
             f"socket://127.0.0.1:{timing_server.port}",
             baudrate=2400,
-            transmission_multiplier=1.0
+            transmission_multiplier=1.0,
         )
 
         await transport.open()
@@ -352,10 +354,10 @@ class TestMBusTransportTiming:
         # Create multiple transports
         transports = []
         for _ in range(3):
-            transport = MBusTransport(
+            transport = Transport(
                 f"socket://127.0.0.1:{timing_server.port}",
                 baudrate=9600,
-                transmission_multiplier=1.2
+                transmission_multiplier=1.2,
             )
             await transport.open()
             transports.append(transport)
@@ -378,7 +380,7 @@ class TestMBusTransportTiming:
 
             # All should succeed
             for result in results:
-                assert all(r == b"\xE5" for r in result)
+                assert all(r == b"\xe5" for r in result)
 
             # Total time should be reasonable for concurrent execution
             assert total_time < 1.0
@@ -387,7 +389,7 @@ class TestMBusTransportTiming:
             for transport in transports:
                 await transport.close()
 
-    async def _send_two_requests(self, transport: MBusTransport) -> list[bytes]:
+    async def _send_two_requests(self, transport: Transport) -> list[bytes]:
         """Helper to send two requests and return responses."""
         responses = []
         for _ in range(2):

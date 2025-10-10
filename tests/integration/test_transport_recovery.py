@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from src.mbusmaster.exceptions import MBusConnectionError
-from src.mbusmaster.transport import MBusTransport
+from src.mbusmaster.transport import Transport
 
 
 class UnstableServer:
@@ -90,13 +90,13 @@ class UnstableServer:
                         await asyncio.sleep(5.0)  # Very slow
                     elif self.failure_mode == "partial_response":
                         # Send incomplete response
-                        writer.write(b"\xE5"[:-1])  # Partial ACK
+                        writer.write(b"\xe5"[:-1])  # Partial ACK
                         await writer.drain()
                         break
 
                 # Normal response
                 if self.failure_mode != "refuse_connection":
-                    writer.write(b"\xE5")
+                    writer.write(b"\xe5")
                     await writer.drain()
 
         except Exception:
@@ -140,7 +140,7 @@ class TestMBusTransportRecovery:
         """Test that connection drops are properly detected."""
         unstable_server.set_failure_mode("drop_connection", after_requests=1)
 
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         await transport.open()
         assert transport.is_connected()
@@ -168,7 +168,7 @@ class TestMBusTransportRecovery:
         self, unstable_server: UnstableServer
     ) -> None:
         """Test successful reconnection after connection drop."""
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         # Initial connection
         await transport.open()
@@ -186,7 +186,7 @@ class TestMBusTransportRecovery:
         snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
         await transport.write(snd_nke)
         response = await transport.read(1, protocol_timeout=1.0)
-        assert response == b"\xE5"
+        assert response == b"\xe5"
 
         await transport.close()
 
@@ -194,9 +194,11 @@ class TestMBusTransportRecovery:
         self, unstable_server: UnstableServer
     ) -> None:
         """Test recovery when server restarts."""
-        unstable_server.set_failure_mode("server_restart", after_requests=1, restart_delay=0.1)
+        unstable_server.set_failure_mode(
+            "server_restart", after_requests=1, restart_delay=0.1
+        )
 
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         await transport.open()
 
@@ -220,7 +222,7 @@ class TestMBusTransportRecovery:
         # Test communication works again
         await transport.write(snd_nke)
         response = await transport.read(1, protocol_timeout=1.0)
-        assert response == b"\xE5"
+        assert response == b"\xe5"
 
         await transport.close()
 
@@ -228,7 +230,7 @@ class TestMBusTransportRecovery:
         self, unstable_server: UnstableServer
     ) -> None:
         """Test handling multiple consecutive connection failures."""
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         # Test multiple open/close cycles
         for _ in range(3):
@@ -239,7 +241,7 @@ class TestMBusTransportRecovery:
             snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
             await transport.write(snd_nke)
             response = await transport.read(1, protocol_timeout=1.0)
-            assert response == b"\xE5"
+            assert response == b"\xe5"
 
             await transport.close()
             assert not transport.is_connected()
@@ -253,7 +255,7 @@ class TestMBusTransportRecovery:
         """Test recovery from connection timeouts."""
         unstable_server.set_failure_mode("slow_response", after_requests=1)
 
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         await transport.open()
 
@@ -275,7 +277,7 @@ class TestMBusTransportRecovery:
         # Should work normally now
         await transport.write(snd_nke)
         response = await transport.read(1, protocol_timeout=1.0)
-        assert response == b"\xE5"
+        assert response == b"\xe5"
 
         await transport.close()
 
@@ -285,7 +287,7 @@ class TestMBusTransportRecovery:
         """Test handling of partial responses."""
         unstable_server.set_failure_mode("partial_response", after_requests=1)
 
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         await transport.open()
 
@@ -304,7 +306,7 @@ class TestMBusTransportRecovery:
         self, unstable_server: UnstableServer
     ) -> None:
         """Test rapid connection open/close cycles."""
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         # Rapid cycles to test for resource leaks or state issues
         for _ in range(10):
@@ -316,14 +318,14 @@ class TestMBusTransportRecovery:
         snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
         await transport.write(snd_nke)
         response = await transport.read(1, protocol_timeout=1.0)
-        assert response == b"\xE5"
+        assert response == b"\xe5"
         await transport.close()
 
     async def test_connection_state_consistency(
         self, unstable_server: UnstableServer
     ) -> None:
         """Test that connection state remains consistent through failures."""
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         # Initially not connected
         assert not transport.is_connected()
@@ -355,7 +357,7 @@ class TestMBusTransportRecovery:
         unstable_server.set_failure_mode("drop_connection", after_requests=1)
 
         try:
-            async with MBusTransport(
+            async with Transport(
                 f"socket://127.0.0.1:{unstable_server.port}"
             ) as transport:
                 assert transport.is_connected()
@@ -381,7 +383,7 @@ class TestMBusTransportRecovery:
         # Create multiple transports
         transports = []
         for _ in range(3):
-            transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+            transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
             transports.append(transport)
 
         try:
@@ -411,12 +413,12 @@ class TestMBusTransportRecovery:
 
             # All should succeed
             for result in results:
-                assert result == b"\xE5"
+                assert result == b"\xe5"
 
         finally:
             await asyncio.gather(*[t.close() for t in transports])
 
-    async def _test_communication(self, transport: MBusTransport) -> bytes:
+    async def _test_communication(self, transport: Transport) -> bytes:
         """Helper to test basic communication."""
         snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
         await transport.write(snd_nke)
@@ -426,7 +428,7 @@ class TestMBusTransportRecovery:
         self, unstable_server: UnstableServer
     ) -> None:
         """Test that errors are properly propagated during recovery attempts."""
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         await transport.open()
 
@@ -452,7 +454,7 @@ class TestMBusTransportRecovery:
         """Test proper cleanup when facing repeated failures."""
         unstable_server.set_failure_mode("drop_connection", after_requests=1)
 
-        transport = MBusTransport(f"socket://127.0.0.1:{unstable_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{unstable_server.port}")
 
         # Try multiple operations that will fail
         for _ in range(5):
@@ -472,5 +474,5 @@ class TestMBusTransportRecovery:
         snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
         await transport.write(snd_nke)
         response = await transport.read(1, protocol_timeout=1.0)
-        assert response == b"\xE5"
+        assert response == b"\xe5"
         await transport.close()

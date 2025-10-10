@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from src.mbusmaster.exceptions import MBusConnectionError
-from src.mbusmaster.transport import MBusTransport
+from src.mbusmaster.transport import Transport
 
 
 class MockMBusServer:
@@ -91,19 +91,52 @@ class MockMBusServer:
         """Generate appropriate M-Bus response."""
         if len(request) == 5 and request[0] == 0x10:
             # Short frame (SND_NKE) - respond with ACK
-            return b"\xE5"
+            return b"\xe5"
         elif len(request) == 5 and request[1] == 0x5B:
             # REQ_UD2 - respond with sample data frame
-            return bytes([
-                0x68, 0x1F, 0x1F, 0x68,  # Start, L, L, Start
-                0x08, 0x05,  # C-Field, A-Field
-                0x72, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE,  # Sample data
-                0x02, 0xFD, 0x1B, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0xAB,  # Checksum
-                0x16   # Stop
-            ])
+            return bytes(
+                [
+                    0x68,
+                    0x1F,
+                    0x1F,
+                    0x68,  # Start, L, L, Start
+                    0x08,
+                    0x05,  # C-Field, A-Field
+                    0x72,
+                    0x12,
+                    0x34,
+                    0x56,
+                    0x78,
+                    0x9A,
+                    0xBC,
+                    0xDE,  # Sample data
+                    0x02,
+                    0xFD,
+                    0x1B,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0xAB,  # Checksum
+                    0x16,  # Stop
+                ]
+            )
         return b""  # No response for unknown frames
 
 
@@ -124,7 +157,7 @@ class TestMBusTransportTCP:
 
     async def test_tcp_connection_success(self, mock_server: MockMBusServer) -> None:
         """Test successful TCP connection."""
-        transport = MBusTransport(f"socket://127.0.0.1:{mock_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{mock_server.port}")
 
         await transport.open()
         assert transport.is_connected()
@@ -135,7 +168,7 @@ class TestMBusTransportTCP:
     async def test_tcp_connection_failure(self) -> None:
         """Test TCP connection failure to non-existent server."""
         # Use a port that's definitely not in use
-        transport = MBusTransport("socket://127.0.0.1:9999")
+        transport = Transport("socket://127.0.0.1:9999")
 
         with pytest.raises(MBusConnectionError, match="Failed to open connection"):
             await transport.open()
@@ -144,7 +177,7 @@ class TestMBusTransportTCP:
 
     async def test_tcp_write_and_read(self, mock_server: MockMBusServer) -> None:
         """Test writing and reading data over TCP."""
-        transport = MBusTransport(f"socket://127.0.0.1:{mock_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{mock_server.port}")
 
         await transport.open()
 
@@ -154,13 +187,13 @@ class TestMBusTransportTCP:
 
         # Read ACK response
         response = await transport.read(1, protocol_timeout=1.0)
-        assert response == b"\xE5"
+        assert response == b"\xe5"
 
         await transport.close()
 
     async def test_tcp_req_ud2_response(self, mock_server: MockMBusServer) -> None:
         """Test REQ_UD2 command and data response."""
-        transport = MBusTransport(f"socket://127.0.0.1:{mock_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{mock_server.port}")
 
         await transport.open()
 
@@ -190,7 +223,7 @@ class TestMBusTransportTCP:
         """Test timeout behavior with delayed server responses."""
         mock_server.set_response_delay(0.2)  # 200ms delay
 
-        transport = MBusTransport(
+        transport = Transport(
             f"socket://127.0.0.1:{mock_server.port}", transmission_multiplier=1.0
         )
 
@@ -202,7 +235,7 @@ class TestMBusTransportTCP:
 
         # Should succeed with sufficient timeout
         response = await transport.read(1, protocol_timeout=0.5)
-        assert response == b"\xE5"
+        assert response == b"\xe5"
 
         await transport.close()
 
@@ -210,7 +243,7 @@ class TestMBusTransportTCP:
         """Test timeout when server doesn't respond quickly enough."""
         mock_server.set_response_delay(0.5)  # 500ms delay
 
-        transport = MBusTransport(
+        transport = Transport(
             f"socket://127.0.0.1:{mock_server.port}", transmission_multiplier=1.0
         )
 
@@ -232,7 +265,7 @@ class TestMBusTransportTCP:
         """Test handling of connection drop during read operation."""
         mock_server.set_connection_drop(1)  # Drop after first request
 
-        transport = MBusTransport(f"socket://127.0.0.1:{mock_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{mock_server.port}")
 
         await transport.open()
 
@@ -250,21 +283,21 @@ class TestMBusTransportTCP:
 
     async def test_tcp_context_manager(self, mock_server: MockMBusServer) -> None:
         """Test TCP transport as async context manager."""
-        async with MBusTransport(f"socket://127.0.0.1:{mock_server.port}") as transport:
+        async with Transport(f"socket://127.0.0.1:{mock_server.port}") as transport:
             assert transport.is_connected()
 
             # Test basic communication
             snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
             await transport.write(snd_nke)
             response = await transport.read(1, protocol_timeout=1.0)
-            assert response == b"\xE5"
+            assert response == b"\xe5"
 
         # Should be closed after context
         assert not transport.is_connected()
 
     async def test_tcp_multiple_requests(self, mock_server: MockMBusServer) -> None:
         """Test multiple sequential requests over same TCP connection."""
-        transport = MBusTransport(f"socket://127.0.0.1:{mock_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{mock_server.port}")
 
         await transport.open()
 
@@ -273,7 +306,7 @@ class TestMBusTransportTCP:
             snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
             await transport.write(snd_nke)
             response = await transport.read(1, protocol_timeout=1.0)
-            assert response == b"\xE5"
+            assert response == b"\xe5"
 
             # Small delay between requests
             await asyncio.sleep(0.01)
@@ -284,7 +317,7 @@ class TestMBusTransportTCP:
         self, mock_server: MockMBusServer
     ) -> None:
         """Test reconnection capability after connection failure."""
-        transport = MBusTransport(f"socket://127.0.0.1:{mock_server.port}")
+        transport = Transport(f"socket://127.0.0.1:{mock_server.port}")
 
         # First connection
         await transport.open()
@@ -302,12 +335,12 @@ class TestMBusTransportTCP:
         snd_nke = bytes([0x10, 0x40, 0x05, 0x45, 0x16])
         await transport.write(snd_nke)
         response = await transport.read(1, protocol_timeout=1.0)
-        assert response == b"\xE5"
+        assert response == b"\xe5"
 
         await transport.close()
 
     async def test_tcp_invalid_url_format(self) -> None:
         """Test error handling for invalid TCP URL format."""
         with pytest.raises(MBusConnectionError):
-            transport = MBusTransport("socket://invalid-host:not-a-port")
+            transport = Transport("socket://invalid-host:not-a-port")
             await transport.open()

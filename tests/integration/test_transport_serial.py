@@ -13,7 +13,7 @@ from typing import TypedDict
 import pytest
 
 from src.mbusmaster.exceptions import MBusConnectionError
-from src.mbusmaster.transport import MBusTransport
+from src.mbusmaster.transport import Transport
 
 
 class SerialConfig(TypedDict):
@@ -170,7 +170,7 @@ class TestMBusTransportSerial:
     ) -> None:
         """Test successful serial connection."""
         # Use 8N1 for pty compatibility (pty doesn't support all parity modes)
-        transport = MBusTransport(
+        transport = Transport(
             virtual_serial.slave_name, baudrate=9600, parity="N", stopbits=1
         )
 
@@ -182,7 +182,7 @@ class TestMBusTransportSerial:
 
     async def test_serial_connection_failure(self) -> None:
         """Test serial connection failure to non-existent port."""
-        transport = MBusTransport("/dev/nonexistent_serial_port")
+        transport = Transport("/dev/nonexistent_serial_port")
 
         with pytest.raises(MBusConnectionError, match="Failed to open connection"):
             await transport.open()
@@ -193,7 +193,7 @@ class TestMBusTransportSerial:
         self, virtual_serial: VirtualSerialDevice
     ) -> None:
         """Test writing and reading data over serial."""
-        transport = MBusTransport(virtual_serial.slave_name, baudrate=9600, parity="N")
+        transport = Transport(virtual_serial.slave_name, baudrate=9600, parity="N")
 
         await transport.open()
 
@@ -212,7 +212,7 @@ class TestMBusTransportSerial:
     ) -> None:
         """Test serial communication with different baud rates."""
         for baudrate in [2400, 9600, 19200]:
-            transport = MBusTransport(
+            transport = Transport(
                 virtual_serial.slave_name, baudrate=baudrate, parity="N"
             )
 
@@ -232,7 +232,7 @@ class TestMBusTransportSerial:
     ) -> None:
         """Test transmission time calculation affects timeouts."""
         # Use 8N1 for pty compatibility (pty doesn't support parity)
-        transport = MBusTransport(
+        transport = Transport(
             virtual_serial.slave_name,
             baudrate=2400,
             parity="N",  # Use no parity for pty compatibility
@@ -255,7 +255,7 @@ class TestMBusTransportSerial:
         """Test timeout behavior with delayed responses."""
         virtual_serial.set_response_delay(0.1)  # 100ms delay
 
-        transport = MBusTransport(
+        transport = Transport(
             virtual_serial.slave_name, baudrate=9600, transmission_multiplier=1.0
         )
 
@@ -277,7 +277,7 @@ class TestMBusTransportSerial:
         """Test timeout when device doesn't respond quickly enough."""
         virtual_serial.set_response_delay(0.3)  # 300ms delay
 
-        transport = MBusTransport(
+        transport = Transport(
             virtual_serial.slave_name, baudrate=9600, transmission_multiplier=1.0
         )
 
@@ -300,7 +300,7 @@ class TestMBusTransportSerial:
         # Test configuration storage and one that works with pty
         test_config = SerialConfig(bytesize=8, parity="N", stopbits=1)  # 8N1
 
-        transport = MBusTransport(
+        transport = Transport(
             virtual_serial.slave_name,
             bytesize=test_config["bytesize"],
             parity=test_config["parity"],
@@ -325,7 +325,7 @@ class TestMBusTransportSerial:
 
         # Additional test: verify M-Bus standard configuration can be created
         # (even though pty can't open it, we can verify the transport accepts it)
-        mbus_transport = MBusTransport(
+        mbus_transport = Transport(
             "/dev/dummy",  # Won't actually open this
             bytesize=8,
             parity="E",  # Even parity - M-Bus standard
@@ -337,7 +337,7 @@ class TestMBusTransportSerial:
         self, virtual_serial: VirtualSerialDevice
     ) -> None:
         """Test REQ_UD2 command and data response over serial."""
-        transport = MBusTransport(virtual_serial.slave_name, baudrate=9600)
+        transport = Transport(virtual_serial.slave_name, baudrate=9600)
 
         await transport.open()
 
@@ -367,7 +367,7 @@ class TestMBusTransportSerial:
         self, virtual_serial: VirtualSerialDevice
     ) -> None:
         """Test serial transport as async context manager."""
-        async with MBusTransport(virtual_serial.slave_name, baudrate=9600) as transport:
+        async with Transport(virtual_serial.slave_name, baudrate=9600) as transport:
             assert transport.is_connected()
 
             # Test basic communication
@@ -383,7 +383,7 @@ class TestMBusTransportSerial:
         self, virtual_serial: VirtualSerialDevice
     ) -> None:
         """Test multiple sequential requests over same serial connection."""
-        transport = MBusTransport(virtual_serial.slave_name, baudrate=9600)
+        transport = Transport(virtual_serial.slave_name, baudrate=9600)
 
         await transport.open()
 
@@ -405,7 +405,7 @@ class TestMBusTransportSerial:
         """Test that transmission multiplier affects timeouts correctly."""
         # Test with different multipliers and verify the calculation
         for multiplier in [1.0, 1.2, 1.5]:
-            transport = MBusTransport(
+            transport = Transport(
                 virtual_serial.slave_name,
                 baudrate=2400,
                 transmission_multiplier=multiplier,
@@ -434,7 +434,7 @@ class TestMBusTransportSerial:
         """Test handling when serial device stops responding."""
         virtual_serial.set_drop_after_count(1)  # Stop after first request
 
-        transport = MBusTransport(virtual_serial.slave_name, baudrate=9600)
+        transport = Transport(virtual_serial.slave_name, baudrate=9600)
 
         await transport.open()
 

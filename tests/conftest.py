@@ -27,6 +27,8 @@ def mock_serial_connection() -> tuple[AsyncMock, AsyncMock]:
     mock_writer.wait_closed = AsyncMock()
 
     mock_reader.readexactly = AsyncMock()
+    # Mock read() to timeout immediately (simulating empty buffer)
+    mock_reader.read = AsyncMock(side_effect=asyncio.TimeoutError())
 
     return mock_reader, mock_writer
 

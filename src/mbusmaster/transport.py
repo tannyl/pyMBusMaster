@@ -10,7 +10,7 @@ import serial_asyncio_fast
 from .exceptions import MBusConnectionError
 
 
-class MBusTransport:
+class Transport:
     """Handles connection and raw byte I/O for M-Bus communication.
 
     Supports multiple connection types:
@@ -102,14 +102,16 @@ class MBusTransport:
         """
         # Calculate bits per byte based on serial configuration
         bits_per_byte = (
-            1 +  # start bit
-            int(self.serial_kwargs["bytesize"]) +  # data bits
-            (1 if self.serial_kwargs["parity"] != "N" else 0) +  # parity bit
-            float(self.serial_kwargs["stopbits"])  # stop bits
+            1  # start bit
+            + int(self.serial_kwargs["bytesize"])  # data bits
+            + (1 if self.serial_kwargs["parity"] != "N" else 0)  # parity bit
+            + float(self.serial_kwargs["stopbits"])  # stop bits
         )
 
         # Calculate base transmission time
-        base_transmission_time = (size * bits_per_byte) / int(self.serial_kwargs["baudrate"])
+        base_transmission_time = (size * bits_per_byte) / int(
+            self.serial_kwargs["baudrate"]
+        )
 
         # Return total timeout with multiplier applied
         return protocol_timeout + base_transmission_time * self.transmission_multiplier
@@ -164,14 +166,36 @@ class MBusTransport:
     async def write(self, data: bytes) -> None:
         """Write raw bytes to transport.
 
+        Clears any pending input data before writing to ensure clean
+        communication state.
+
         Args:
             data: Bytes to send
 
         Raises:
             MBusConnectionError: If not connected
         """
-        if not self._connected or not self._writer:
+        if not self._connected or not self._writer or not self._reader:
             raise MBusConnectionError("Transport is not connected")
+
+        # Clear any pending input data before writing
+        # This ensures we don't read stale data from previous commands
+        try:
+            while True:
+                # Try to read any available data with very short timeout (1ms)
+                old_data = await asyncio.wait_for(
+                    self._reader.read(1024), timeout=0.001
+                )
+                if not old_data:
+                    # No more data available
+                    break
+                # Data was found and discarded - continue reading
+        except TimeoutError:
+            # No more data available, buffer is clear - this is expected
+            pass
+        except Exception as e:
+            self._connected = False  # Mark as disconnected on error
+            raise MBusConnectionError(f"Failed to clear input buffer: {e}") from e
 
         try:
             self._writer.write(data)
@@ -209,7 +233,7 @@ class MBusTransport:
             # Read exactly the requested number of bytes with calculated timeout
             data = await asyncio.wait_for(
                 self._reader.readexactly(size),
-                timeout=self._calculate_timeout(size, protocol_timeout)
+                timeout=self._calculate_timeout(size, protocol_timeout),
             )
             return data
         except TimeoutError:
@@ -222,7 +246,7 @@ class MBusTransport:
             self._connected = False  # Mark as disconnected on error
             raise MBusConnectionError(f"Failed to read data: {e}") from e
 
-    async def __aenter__(self) -> MBusTransport:
+    async def __aenter__(self) -> Transport:
         """Async context manager entry."""
         await self.open()
         return self
