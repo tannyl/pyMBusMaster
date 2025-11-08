@@ -71,7 +71,7 @@ DIFE_FINAL_CODE = 0b00000000  # Final DIFE code indicating storage number is reg
 # =============================================================================
 
 
-class DIFSpecialFunction(Flag):
+class _SpecialFieldFunction(Flag):
     MANUFACTURER_DATA_HEADER = auto()
     MORE_RECORDS_FOLLOW = auto()
     IDLE_FILLER = auto()
@@ -104,7 +104,7 @@ class _DataFieldDescriptor(_AbstractFieldDescriptor):
 class _SpecialFieldDescriptor(_AbstractFieldDescriptor):
     mask: int = 0b11111111  # Bit mask for pattern matching
 
-    function: DIFSpecialFunction  # Special function type
+    function: _SpecialFieldFunction  # Special function type
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -216,23 +216,23 @@ _FieldTable: tuple[_AbstractFieldDescriptor, ...] = (
     # 0x0F: Manufacturer specific data follows
     _SpecialFieldDescriptor(
         code=0b00001111,
-        function=DIFSpecialFunction.MANUFACTURER_DATA_HEADER,
+        function=_SpecialFieldFunction.MANUFACTURER_DATA_HEADER,
     ),
     # 0x1F: More records follow in next datagram + manufacturer data
     _SpecialFieldDescriptor(
         code=0b00011111,
-        function=DIFSpecialFunction.MANUFACTURER_DATA_HEADER | DIFSpecialFunction.MORE_RECORDS_FOLLOW,
+        function=_SpecialFieldFunction.MANUFACTURER_DATA_HEADER | _SpecialFieldFunction.MORE_RECORDS_FOLLOW,
         direction=CommunicationDirection.SLAVE_TO_MASTER,
     ),
     # 0x2F: Idle filler (skip this byte)
     _SpecialFieldDescriptor(
         code=0b00101111,
-        function=DIFSpecialFunction.IDLE_FILLER,
+        function=_SpecialFieldFunction.IDLE_FILLER,
     ),
     # 0x7F: Global readout request
     _SpecialFieldDescriptor(
         code=0b01111111,
-        function=DIFSpecialFunction.GLOBAL_READOUT,
+        function=_SpecialFieldFunction.GLOBAL_READOUT,
         direction=CommunicationDirection.MASTER_TO_SLAVE,
     ),
 )
@@ -479,7 +479,7 @@ class SpecialDIF(DIF):
     Reference: EN 13757-3:2018, Table 6 (page 14)
     """
 
-    special_function: DIFSpecialFunction
+    special_function: _SpecialFieldFunction
 
     def __init__(self, direction: CommunicationDirection, field_code: int) -> None:
         super().__init__(direction, field_code)

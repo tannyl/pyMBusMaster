@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.mbusmaster.constants import CommunicationDirection
+from src.mbusmaster.protocol import CommunicationDirection
 from src.mbusmaster.protocol.data import DataType
 from src.mbusmaster.protocol.dif import (
     DIF,
@@ -212,17 +212,17 @@ class TestSpecialDIF:
         """Test MANUFACTURER_DATA_HEADER special function."""
         dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_SPECIAL_DIF_MANUFACTURER)
         assert isinstance(dif, SpecialDIF)
-        from src.mbusmaster.protocol.dif import DIFSpecialFunction
+        from src.mbusmaster.protocol.dif import _SpecialFieldFunction
 
-        assert DIFSpecialFunction.MANUFACTURER_DATA_HEADER in dif.special_function
+        assert _SpecialFieldFunction.MANUFACTURER_DATA_HEADER in dif.special_function
 
     def test_idle_filler(self) -> None:
         """Test IDLE_FILLER special function."""
         dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_SPECIAL_DIF_IDLE_FILLER)
         assert isinstance(dif, SpecialDIF)
-        from src.mbusmaster.protocol.dif import DIFSpecialFunction
+        from src.mbusmaster.protocol.dif import _SpecialFieldFunction
 
-        assert dif.special_function == DIFSpecialFunction.IDLE_FILLER
+        assert dif.special_function == _SpecialFieldFunction.IDLE_FILLER
 
 
 # =============================================================================
@@ -545,6 +545,7 @@ class TestDIFFromBytesAsync:
 
     async def test_parse_single_dif_no_extension(self) -> None:
         """Test parsing single DIF without extension bit."""
+
         # Mock byte provider - returns single DIF byte
         async def get_next_bytes(n: int) -> bytes:
             assert n == 1
@@ -786,9 +787,7 @@ class TestErrorScenarios:
 
         # Bypass factory to force creation of DataDIFE with all zeros
         data_dife = object.__new__(DataDIFE)
-        with pytest.raises(
-            ValueError, match="DataDIFE may not have storage number, subunit, tariff all zero"
-        ):
+        with pytest.raises(ValueError, match="DataDIFE may not have storage number, subunit, tariff all zero"):
             # Call __init__ directly with field_code that results in all zeros
             # This simulates what would happen if factory allowed DataDIFE with 0x00
             DataDIFE.__init__(
