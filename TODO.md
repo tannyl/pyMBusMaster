@@ -106,17 +106,17 @@ Implement M-Bus master library for reading data from meters
 
 ### 1.2 Block Parsers (DIB/VIB/DRH)
 
-#### dib.py - DIB Block Parser (🚧 In Progress)
+#### dib.py - DIB Block Parser (✅ Complete - pending real-world testing)
 **Architecture**: Class-based DIB with DIF/DIFE chain parsing via async from_bytes_async()
 **Uses**: `DIF` and `DIFE` classes from dif.py
 - [x] Define `DIB` class structure
-- [ ] Implement `from_bytes_async()` async parsing method
-- [ ] Instantiate `DIF(field_code)` for primary DIF byte
-- [ ] Parse DIFE chain by calling `DIF.from_bytes_async()`
-- [ ] Calculate storage number from DIF + DIFEs using class attributes
-- [ ] Extract tariff and subunit from DIFE instances
-- [ ] Extract data type/length/function from DIF instance
-- [ ] Implement DIB subclasses (DataDIB, SpecialDIB, etc.)
+- [x] Implement `from_bytes_async()` async parsing method
+- [x] Instantiate `DIF(field_code)` for primary DIF byte
+- [x] Parse DIFE chain by calling `DIF.from_bytes_async()`
+- [x] Calculate storage number from DIF + DIFEs using class attributes
+- [x] Extract tariff and subunit from DIFE instances
+- [x] Extract data type/length/function from DIF instance
+- [x] Implement DIB subclasses (DataDIB, SpecialDIB, etc.)
 - [ ] Test with real meter data
 
 #### vib.py - VIB Block Parser (🚧 In Progress)
