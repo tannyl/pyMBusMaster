@@ -59,6 +59,12 @@
    - Add docstrings to all public functions and classes
    - Keep TODO.md current with progress
 
+4. **Temporary Files**
+   - Create temporary test scripts, analysis files, and experimental code in `temp/`
+   - The `temp/` directory is ignored by git and keeps the root directory clean
+   - Organize files in subdirectories as needed (e.g., `temp/test_scripts/`, `temp/analysis/`)
+   - Clean up temporary files periodically or when they're no longer needed
+
 ## Important Project Files
 
 ### When Working on TODO Items
@@ -82,6 +88,7 @@ tests/      - Test files
 docs/       - Documentation source
 examples/   - Example code
 reference/  - Reference materials (ignored by git)
+temp/       - Temporary analysis/test files (ignored by git)
 ```
 
 ## Important Notes
