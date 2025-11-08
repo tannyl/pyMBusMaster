@@ -86,11 +86,66 @@ reference/  - Reference materials (ignored by git)
 
 ## Important Notes
 
-The `reference/` directory contains
-- M-Bus specifications (EN 13757-3)
-- Documentation from manufacturers implementing M-Bus in their devices
-- Other related files.
+### Reference Directory Structure
 
-The original PDF files have been converted into .txt files for easy processing.
+The `reference/` directory contains a comprehensive M-Bus documentation library:
 
-Large files have also been split up into separate files containing the different chapters.
+**Specifications:**
+- EN 13757-2:2018 (Wired M-Bus / Link Layer)
+- EN 13757-3:2018 (Application Layer)
+- EN 13757-4:2019 (Wireless M-Bus)
+- MBDOC48 (Older M-Bus specification with detailed FCB/FCV documentation)
+- OMS specifications (Open Metering System)
+- Manufacturer documentation (Carlo Gavazzi, Danfoss, Landis+Gyr, Pipersberg, Rishabh, Wachendorff)
+
+**File Organization:**
+
+Each specification directory contains:
+```
+EN 13757-X 20XX specs/
+├── PDF/
+│   └── original.pdf          ← Original PDF (preserved, never modified)
+├── original_full.xml          ← Full XML with colors/formatting (for grep search)
+├── index.json                 ← Smart index with outline + topic mappings
+└── pages/                     ← Individual page files for reading with context
+    ├── page_001.xml
+    ├── page_002.xml
+    └── ...
+```
+
+**How to Use Reference Files:**
+
+1. **Finding Information:**
+   - Load `index.json` to find relevant pages via outline or topics
+   - Example: `index['topics']['FCB']` returns page numbers containing FCB
+
+2. **Reading with Full Context:**
+   - Read individual page files (e.g., `pages/page_017.xml`)
+   - Each page is ~2-4KB with complete context
+   - Preserves colors, formatting, and layout from original PDF
+
+3. **Searching Across Documents:**
+   - Use grep on full XML files for keyword search
+   - Then read specific pages for full context
+
+**Benefits:**
+- ✅ Original PDFs preserved and never modified
+- ✅ Full XML available for searching (with colors/formatting)
+- ✅ 961 page files split for efficient reading with context
+- ✅ 16 index files with hierarchical navigation (where available)
+- ✅ Topic mappings for quick lookups
+
+**Example Workflow:**
+```python
+import json
+
+# Find pages about FCB
+with open('reference/EN 13757-2 2018 specs/index.json') as f:
+    index = json.load(f)
+
+fcb_pages = index['topics']['FCB']  # Returns: [14, 16, 17]
+
+# Read specific page with full context
+Read('reference/EN 13757-2 2018 specs/pages/page_017.xml')
+# Gets complete section 5.7.7 "Datagram sequencing" with all details
+```
