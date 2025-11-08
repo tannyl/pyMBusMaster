@@ -514,9 +514,19 @@ class TestDIBFromBytesAsync:
         ("byte_sequence", "expected_storage", "expected_function", "expected_register_number"),
         [
             # No DIFEs
-            ([TEST_DIF_32BIT_INST], 0, ValueFunction.INSTANTANEOUS, False),
+            (
+                [TEST_DIF_32BIT_INST],
+                0,
+                ValueFunction.INSTANTANEOUS,
+                False,
+            ),
             # Single DIFE
-            ([TEST_DIF_32BIT_INST_EXT, TEST_DIFE_STORAGE_1], 2, ValueFunction.INSTANTANEOUS, False),
+            (
+                [TEST_DIF_32BIT_INST_EXT, TEST_DIFE_STORAGE_1],
+                2,
+                ValueFunction.INSTANTANEOUS,
+                False,
+            ),
             # Multiple DIFEs - storage: 1 + (15<<1) + (1<<5) = 1 + 30 + 32 = 63
             (
                 [TEST_DIF_32BIT_INST_STORAGE1_EXT, TEST_DIFE_STORAGE_15_EXT, TEST_DIFE_STORAGE_1],
@@ -525,7 +535,12 @@ class TestDIBFromBytesAsync:
                 False,
             ),
             # FinalDIFE
-            ([TEST_DIF_32BIT_INST_EXT, TEST_FINAL_DIFE], 0, ValueFunction.INSTANTANEOUS, True),
+            (
+                [TEST_DIF_32BIT_INST_EXT, TEST_FINAL_DIFE],
+                0,
+                ValueFunction.INSTANTANEOUS,
+                True,
+            ),
         ],
     )
     async def test_parse_data_dib(
@@ -582,10 +597,17 @@ class TestDIBFromBytesAsync:
         expected_more_records: bool | None,
     ) -> None:
         """Test parsing SpecialDIB subclasses."""
+        byte_sequence = [dif_code]
+        call_count = 0
+        max_calls = len(byte_sequence)
 
         async def get_next_bytes(n: int) -> bytes:
+            nonlocal call_count
             assert n == 1
-            return bytes([dif_code])
+            assert call_count < max_calls
+            result = bytes([byte_sequence[call_count]])
+            call_count += 1
+            return result
 
         dib = await DIB.from_bytes_async(direction, get_next_bytes)
 
@@ -596,9 +618,17 @@ class TestDIBFromBytesAsync:
 
     async def test_insufficient_bytes_raises(self) -> None:
         """Test that insufficient bytes raises ValueError from DIF parsing."""
+        byte_sequence = [[]]  # Empty bytes
+        call_count = 0
+        max_calls = len(byte_sequence)
 
         async def get_next_bytes(n: int) -> bytes:
-            return b""  # No bytes
+            nonlocal call_count
+            assert n == 1
+            assert call_count < max_calls
+            result = bytes(byte_sequence[call_count])
+            call_count += 1
+            return result
 
         # Should raise from DIF.from_bytes_async()
         with pytest.raises(ValueError, match="Expected exactly one byte for DIF"):
