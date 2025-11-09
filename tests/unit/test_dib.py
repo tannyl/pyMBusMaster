@@ -119,6 +119,7 @@ class TestDataDIB:
             (TEST_DIF_32BIT_MIN, ValueFunction.MINIMUM),
             (TEST_DIF_32BIT_ERROR, ValueFunction.ERROR),
         ],
+        ids=["instantaneous", "maximum", "minimum", "error"],
     )
     def test_value_function_from_dif(self, dif_code: int, expected_function: ValueFunction) -> None:
         """Test that value_function is correctly set from DIF."""
@@ -133,6 +134,7 @@ class TestDataDIB:
             (TEST_DIF_32BIT_INST, 0),  # Storage bit 6 = 0
             (TEST_DIF_32BIT_INST_STORAGE1, 1),  # Storage bit 6 = 1
         ],
+        ids=["storage_0", "storage_1"],
     )
     def test_storage_number_from_dif_only(self, dif_code: int, expected_storage: int) -> None:
         """Test storage number from DIF alone (no DIFEs)."""
@@ -208,6 +210,7 @@ class TestDataDIB:
             (TEST_FINAL_DIFE, True),
             (TEST_DIFE_STORAGE_1, False),
         ],
+        ids=["final_dife", "normal_dife"],
     )
     def test_register_number_flag(self, dife_code: int, expected_register_number: bool) -> None:
         """Test that register_number flag is correctly set based on DIFE type."""
@@ -272,6 +275,7 @@ class TestDataDIB:
             0,  # Points to wrong field (DIF instead of correct position)
             999,  # Out of bounds
         ],
+        ids=["negative", "zero", "out_of_bounds"],
     )
     def test_broken_chain_invalid_position_raises(self, invalid_position: int) -> None:
         """Test that invalid chain positions raise ValueError.
@@ -382,6 +386,7 @@ class TestSpecialDIB:
             (TEST_SPECIAL_DIF_IDLE_FILLER, CommunicationDirection.SLAVE_TO_MASTER),
             (TEST_SPECIAL_DIF_GLOBAL_READOUT, CommunicationDirection.MASTER_TO_SLAVE),
         ],
+        ids=["manufacturer", "more_records", "idle_filler", "global_readout"],
     )
     def test_factory_creates_special_dib(self, dif_code: int, direction: CommunicationDirection) -> None:
         """Test that factory creates SpecialDIB for special DIF codes."""
@@ -429,6 +434,7 @@ class TestManufacturerDIB:
             (TEST_SPECIAL_DIF_MANUFACTURER, False),
             (TEST_SPECIAL_DIF_MORE_RECORDS, True),
         ],
+        ids=["manufacturer_only", "with_more_records"],
     )
     def test_more_records_follow(self, dif_code: int, expected_more_records: bool) -> None:
         """Test that more_records_follow is correctly set based on DIF code."""
@@ -442,6 +448,7 @@ class TestManufacturerDIB:
             TEST_SPECIAL_DIF_MANUFACTURER,
             TEST_SPECIAL_DIF_MORE_RECORDS,
         ],
+        ids=["manufacturer", "more_records"],
     )
     def test_factory_creates_correct_type(self, dif_code: int) -> None:
         """Test that factory creates ManufacturerDIB for manufacturer codes."""
@@ -542,6 +549,7 @@ class TestDIBFromBytesAsync:
                 True,
             ),
         ],
+        ids=["no_difes", "single_dife", "multiple_difes", "with_final_dife"],
     )
     async def test_parse_data_dib(
         self,
@@ -588,6 +596,7 @@ class TestDIBFromBytesAsync:
             (TEST_SPECIAL_DIF_IDLE_FILLER, IdleFillerDIB, CommunicationDirection.SLAVE_TO_MASTER, None),
             (TEST_SPECIAL_DIF_GLOBAL_READOUT, GlobalReadoutDIB, CommunicationDirection.MASTER_TO_SLAVE, None),
         ],
+        ids=["manufacturer", "more_records", "idle_filler", "global_readout"],
     )
     async def test_parse_special_dib(
         self,
