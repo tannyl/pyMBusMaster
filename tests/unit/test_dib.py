@@ -3,6 +3,7 @@
 import pytest
 
 from src.mbusmaster.protocol import CommunicationDirection
+from src.mbusmaster.protocol.data import DataRules
 from src.mbusmaster.protocol.dib import (
     DIB,
     DataDIB,
@@ -12,7 +13,7 @@ from src.mbusmaster.protocol.dib import (
     ReadoutSelectionDIB,
     SpecialDIB,
 )
-from src.mbusmaster.protocol.dif import DIF, DataDIFE
+from src.mbusmaster.protocol.dif import DIF
 from src.mbusmaster.protocol.value import ValueFunction
 
 # =============================================================================
@@ -58,6 +59,14 @@ TEST_FINAL_DIFE = 0x00  # Final DIFE marking register number
 TEST_DIFE_MAXIMUM_CHAIN_LENGTH = 10
 TEST_DIB_MAXIMUM_REGISTER_NUMBER = 125
 
+# Expected bytes for to_bytes() tests
+TEST_DIB_32BIT_INST_BYTES = bytes([TEST_DIF_32BIT_INST])
+TEST_DIB_32BIT_WITH_DIFE_BYTES = bytes([TEST_DIF_32BIT_INST_EXT, TEST_DIFE_STORAGE_1])
+TEST_DIB_32BIT_WITH_MULTIPLE_DIFES_BYTES = bytes(
+    [TEST_DIF_32BIT_INST_EXT, TEST_DIFE_STORAGE_1_EXT, TEST_DIFE_STORAGE_1]
+)
+TEST_DIB_SPECIAL_MANUFACTURER_BYTES = bytes([TEST_SPECIAL_DIF_MANUFACTURER])
+
 
 # =============================================================================
 # DIB Base Class Tests
@@ -87,7 +96,7 @@ class TestDIB:
         dife2 = dife1.create_next_dife(TEST_DIFE_STORAGE_1)
 
         # Create DIB with wrong chain - skip dife1
-        with pytest.raises(ValueError, match="chain length mismatch"):
+        with pytest.raises(ValueError, match="chain is broken"):
             DIB(CommunicationDirection.SLAVE_TO_MASTER, dif, dife2)
 
     def test_stores_direction(self) -> None:
@@ -95,6 +104,56 @@ class TestDIB:
         dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST)
         dib = DIB(CommunicationDirection.SLAVE_TO_MASTER, dif)
         assert dib.direction == CommunicationDirection.SLAVE_TO_MASTER
+
+    @pytest.mark.parametrize(
+        ("dif_code", "dife_codes", "expected_bytes"),
+        [
+            # Simple DataDIB without DIFEs
+            (
+                TEST_DIF_32BIT_INST,
+                [],
+                TEST_DIB_32BIT_INST_BYTES,
+            ),
+            # DataDIB with single DIFE
+            (
+                TEST_DIF_32BIT_INST_EXT,
+                [TEST_DIFE_STORAGE_1],
+                TEST_DIB_32BIT_WITH_DIFE_BYTES,
+            ),
+            # DataDIB with multiple DIFEs
+            (
+                TEST_DIF_32BIT_INST_EXT,
+                [TEST_DIFE_STORAGE_1_EXT, TEST_DIFE_STORAGE_1],
+                TEST_DIB_32BIT_WITH_MULTIPLE_DIFES_BYTES,
+            ),
+            # SpecialDIB
+            (
+                TEST_SPECIAL_DIF_MANUFACTURER,
+                [],
+                TEST_DIB_SPECIAL_MANUFACTURER_BYTES,
+            ),
+        ],
+        ids=["data_dib_no_dife", "data_dib_single_dife", "data_dib_multiple_difes", "special_dib"],
+    )
+    def test_to_bytes_serializes_complete_chain(
+        self, dif_code: int, dife_codes: list[int], expected_bytes: bytes
+    ) -> None:
+        """Test that to_bytes() correctly serializes the complete DIF/DIFE chain."""
+        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, dif_code)
+
+        # Build DIFE chain and collect in list
+        difes = []
+        current_field = dif
+        for dife_code in dife_codes:
+            current_field = current_field.create_next_dife(dife_code)
+            difes.append(current_field)
+
+        # Create DIB from complete chain
+        dib = DIB(CommunicationDirection.SLAVE_TO_MASTER, dif, *difes)
+
+        result = dib.to_bytes()
+        assert result == expected_bytes
+        assert len(result) == len(expected_bytes)
 
 
 # =============================================================================
@@ -110,6 +169,21 @@ class TestDataDIB:
         dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST)
         dib = DIB(CommunicationDirection.SLAVE_TO_MASTER, dif)
         assert isinstance(dib, DataDIB)
+
+    @pytest.mark.parametrize(
+        ("dif_code", "expected_data_support"),
+        [
+            (TEST_DIF_32BIT_INST, DataRules.Supports.BCDFK_4),
+            (TEST_DIF_48BIT_INST, DataRules.Supports.BCDI_6),
+        ],
+        ids=["32bit_integer", "48bit_integer"],
+    )
+    def test_data_support_from_dif(self, dif_code: int, expected_data_support: DataRules.Supports) -> None:
+        """Test that data_support is correctly set from DIF."""
+        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, dif_code)
+        dib = DIB(CommunicationDirection.SLAVE_TO_MASTER, dif)
+        assert isinstance(dib, DataDIB)
+        assert dib.data_support is expected_data_support
 
     @pytest.mark.parametrize(
         ("dif_code", "expected_function"),
@@ -220,20 +294,6 @@ class TestDataDIB:
         assert isinstance(dib, DataDIB)
         assert dib.register_number is expected_register_number
 
-    def test_final_dife_cannot_have_next_field(self) -> None:
-        """Test that FinalDIFE with next_field raises ValueError."""
-        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)
-        dife = dif.create_next_dife(TEST_FINAL_DIFE)
-
-        # Manually set next_field to simulate invalid state
-        # This tests DIB's validation of an impossible scenario that would indicate
-        # corrupted data or programming error
-        dife_fake_next = object.__new__(DataDIFE)
-        dife.next_field = dife_fake_next
-
-        with pytest.raises(ValueError, match="Final DIFE cannot have a next field"):
-            DIB(CommunicationDirection.SLAVE_TO_MASTER, dif, dife)
-
     def test_register_number_exceeds_maximum_raises(self) -> None:
         """Test that register number exceeding maximum raises ValueError."""
         # Create a chain that produces storage > 125
@@ -256,42 +316,6 @@ class TestDataDIB:
 
         with pytest.raises(ValueError, match="chain is incomplete"):
             DIB(CommunicationDirection.SLAVE_TO_MASTER, dif, dife)
-
-    def test_non_data_dif_in_chain_raises(self) -> None:
-        """Test that non-data DIF/DIFE in chain raises ValueError."""
-        special_dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_SPECIAL_DIF_MANUFACTURER)
-
-        # Bypass factory to test validation in __init__
-        # Factory pattern prevents this scenario through polymorphic __new__, but
-        # DataDIB.__init__ should still validate to catch programming errors
-        with pytest.raises(ValueError, match="Non-data DIF/DIFE found"):
-            dib_obj = object.__new__(DataDIB)
-            DataDIB.__init__(dib_obj, CommunicationDirection.SLAVE_TO_MASTER, special_dif)
-
-    @pytest.mark.parametrize(
-        "invalid_position",
-        [
-            -1,  # Negative position
-            0,  # Points to wrong field (DIF instead of correct position)
-            999,  # Out of bounds
-        ],
-        ids=["negative", "zero", "out_of_bounds"],
-    )
-    def test_broken_chain_invalid_position_raises(self, invalid_position: int) -> None:
-        """Test that invalid chain positions raise ValueError.
-
-        Tests various ways a chain can be broken by manipulating chain_position.
-        We modify the middle field (not the last) to bypass the chain length check.
-        """
-        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)
-        dife1 = dif.create_next_dife(TEST_DIFE_STORAGE_1_EXT)
-        dife2 = dife1.create_next_dife(TEST_DIFE_STORAGE_1)
-
-        # Set invalid chain_position
-        dife1.chain_position = invalid_position
-
-        with pytest.raises(ValueError, match="chain is broken"):
-            DIB(CommunicationDirection.SLAVE_TO_MASTER, dif, dife1, dife2)
 
     def test_at_chain_limit_is_valid(self) -> None:
         """Test that chain at exactly the limit (10 DIFEs) is valid."""
@@ -349,17 +373,6 @@ class TestReadoutSelectionDIB:
         dib = DIB(CommunicationDirection.MASTER_TO_SLAVE, dif)
         assert isinstance(dib, ReadoutSelectionDIB)
 
-    def test_readout_selection_validation(self) -> None:
-        """Test that ReadoutSelectionDIB validates readout_selection flag."""
-        # Create a DataDIF without readout_selection and try to use it with ReadoutSelectionDIB
-        data_dif = DIF(CommunicationDirection.MASTER_TO_SLAVE, TEST_DIF_32BIT_INST)
-
-        # Bypass factory to test validation in __init__
-        # Factory prevents this scenario, but validation should still exist
-        with pytest.raises(ValueError, match="must have readout_selection set to True"):
-            dib_obj = object.__new__(ReadoutSelectionDIB)
-            ReadoutSelectionDIB.__init__(dib_obj, CommunicationDirection.MASTER_TO_SLAVE, data_dif)  # type: ignore[arg-type]
-
     def test_works_with_difes(self) -> None:
         """Test that ReadoutSelectionDIB works with DIFEs."""
         dif = DIF(CommunicationDirection.MASTER_TO_SLAVE, TEST_DIF_READOUT_SEL_EXT)
@@ -393,31 +406,6 @@ class TestSpecialDIB:
         dif = DIF(direction, dif_code)
         dib = DIB(direction, dif)
         assert isinstance(dib, SpecialDIB)
-
-    def test_non_special_dif_raises(self) -> None:
-        """Test that SpecialDIB rejects non-SpecialDIF."""
-        data_dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST)
-
-        # Bypass factory to test validation in __init__
-        # Factory prevents this scenario, but validation should still exist for robustness
-        with pytest.raises(ValueError, match="must be SpecialDIF"):
-            dib_obj = object.__new__(SpecialDIB)
-            SpecialDIB.__init__(dib_obj, CommunicationDirection.SLAVE_TO_MASTER, data_dif)
-
-    def test_with_dife_raises(self) -> None:
-        """Test that SpecialDIB rejects DIFEs."""
-        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_SPECIAL_DIF_MANUFACTURER)
-
-        # Create a valid DIFE from a regular DIF chain
-        # Special DIFs cannot have extension bit, so this DIFE wouldn't normally exist with SpecialDIF
-        temp_dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)
-        dife = temp_dif.create_next_dife(TEST_DIFE_STORAGE_1)
-
-        # Bypass factory to test validation in __init__
-        # Factory and DIF design prevent this scenario, but validation ensures robustness
-        with pytest.raises(ValueError, match="SpecialDIB cannot have DIFE fields"):
-            dib_obj = object.__new__(ManufacturerDIB)
-            ManufacturerDIB.__init__(dib_obj, CommunicationDirection.SLAVE_TO_MASTER, dif, dife)  # type: ignore[arg-type]
 
 
 # =============================================================================
@@ -471,17 +459,6 @@ class TestIdleFillerDIB:
         dib = DIB(CommunicationDirection.SLAVE_TO_MASTER, dif)
         assert isinstance(dib, IdleFillerDIB)
 
-    def test_idle_filler_validation(self) -> None:
-        """Test that IdleFillerDIB validates special_function."""
-        # Create a SpecialDIF with wrong special_function and try to use it with IdleFillerDIB
-        wrong_dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_SPECIAL_DIF_MANUFACTURER)
-
-        # Bypass factory to test validation in __init__
-        # Factory prevents this scenario, but validation should still exist
-        with pytest.raises(ValueError, match="Invalid special function for IdleFillerDIB"):
-            dib_obj = object.__new__(IdleFillerDIB)
-            IdleFillerDIB.__init__(dib_obj, CommunicationDirection.SLAVE_TO_MASTER, wrong_dif)  # type: ignore[arg-type]
-
 
 # =============================================================================
 # GlobalReadoutDIB Class Tests
@@ -496,17 +473,6 @@ class TestGlobalReadoutDIB:
         dif = DIF(CommunicationDirection.MASTER_TO_SLAVE, TEST_SPECIAL_DIF_GLOBAL_READOUT)
         dib = DIB(CommunicationDirection.MASTER_TO_SLAVE, dif)
         assert isinstance(dib, GlobalReadoutDIB)
-
-    def test_global_readout_validation(self) -> None:
-        """Test that GlobalReadoutDIB validates special_function."""
-        # Create a SpecialDIF with wrong special_function and try to use it with GlobalReadoutDIB
-        wrong_dif = DIF(CommunicationDirection.MASTER_TO_SLAVE, TEST_SPECIAL_DIF_IDLE_FILLER)
-
-        # Bypass factory to test validation in __init__
-        # Factory prevents this scenario, but validation should still exist
-        with pytest.raises(ValueError, match="Invalid special function for GlobalReadoutDIB"):
-            dib_obj = object.__new__(GlobalReadoutDIB)
-            GlobalReadoutDIB.__init__(dib_obj, CommunicationDirection.MASTER_TO_SLAVE, wrong_dif)  # type: ignore[arg-type]
 
 
 # =============================================================================
@@ -627,7 +593,7 @@ class TestDIBFromBytesAsync:
 
     async def test_insufficient_bytes_raises(self) -> None:
         """Test that insufficient bytes raises ValueError from DIF parsing."""
-        byte_sequence = [[]]  # Empty bytes
+        byte_sequence: list[list[int]] = [[]]  # Empty bytes
         call_count = 0
         max_calls = len(byte_sequence)
 

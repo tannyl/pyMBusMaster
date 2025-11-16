@@ -33,7 +33,7 @@ from enum import Flag, auto
 from functools import lru_cache
 
 from .common import CommunicationDirection
-from .data import DataType
+from .data import DataRules
 from .value import ValueFunction
 
 # =============================================================================
@@ -42,7 +42,12 @@ from .value import ValueFunction
 
 
 DIF_EXTENSION_BIT_MASK = 0b10000000  # Bit 7: extension bit (more DIFE bytes follow)
+
 DIF_FUNCTION_BIT_MASK = 0b00110000  # Bits 4-5: function
+DIF_FUNCTION_CODE_INSTANTANEOUS = 0b00000000  # 00: Instantaneous value
+DIF_FUNCTION_CODE_MAXIMUM = 0b00010000  # 01: Maximum value
+DIF_FUNCTION_CODE_MINIMUM = 0b00100000  # 10: Minimum value
+DIF_FUNCTION_CODE_ERROR = 0b00110000  # 11: Error value
 
 DIF_STORAGE_NUMBER_BIT_MASK = 0b01000000  # Bit 6: LSB of storage number
 DIF_STORAGE_NUMBER_BIT_SHIFT = 6  # Bit position shift for storage number
@@ -97,7 +102,7 @@ class _DataFieldDescriptor(_AbstractFieldDescriptor):
 
     readout_selection: bool = False  # Indicates if data field is a readout selection
 
-    data_type: DataType | None = None  # Data type with length encoded (if applicable)
+    data_support: DataRules.Supports = DataRules.Supports.NONE  # Supported data types
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -105,12 +110,6 @@ class _SpecialFieldDescriptor(_AbstractFieldDescriptor):
     mask: int = 0b11111111  # Bit mask for pattern matching
 
     function: _SpecialFieldFunction  # Special function type
-
-
-@dataclass(frozen=True, kw_only=True)
-class _FunctionDescriptor:
-    code: int
-    type: ValueFunction
 
 
 # =============================================================================
@@ -129,50 +128,37 @@ _FieldTable: tuple[_AbstractFieldDescriptor, ...] = (
     # 8 bit integer (0x01)
     _DataFieldDescriptor(
         code=0b00000001,
-        data_type=DataType.B_1 | DataType.C_1 | DataType.D_1,  # Can be signed, unsigned, or boolean
+        data_support=DataRules.Supports.BCD_1,  # Can be signed, unsigned, or boolean
     ),
     # 16 bit integer (0x02)
     _DataFieldDescriptor(
         code=0b00000010,
-        data_type=DataType.B_2
-        | DataType.C_2
-        | DataType.D_2
-        | DataType.G_2,  # Can be signed, unsigned, boolean, or date
+        data_support=DataRules.Supports.BCDG_2,  # Can be signed, unsigned, boolean, or date
     ),
     # 24 bit integer (0x03)
     _DataFieldDescriptor(
         code=0b00000011,
-        data_type=DataType.B_3
-        | DataType.C_3
-        | DataType.D_3
-        | DataType.J_3,  # Can be signed, unsigned, boolean, or time
+        data_support=DataRules.Supports.BCDJ_3,  # Can be signed, unsigned, boolean, or time
     ),
     # 32 bit integer (0x04)
     _DataFieldDescriptor(
         code=0b00000100,
-        data_type=DataType.B_4
-        | DataType.C_4
-        | DataType.D_4
-        | DataType.F_4
-        | DataType.K_4,  # Can be signed, unsigned, boolean, datetime, or DST
+        data_support=DataRules.Supports.BCDFK_4,  # Can be signed, unsigned, boolean, datetime, or DST
     ),
     # 32 bit real (0x05)
     _DataFieldDescriptor(
         code=0b00000101,
-        data_type=DataType.H_4,  # Float only (no conversions)
+        data_support=DataRules.Supports.H_4,  # Float only (no conversions)
     ),
     # 48 bit integer (0x06)
     _DataFieldDescriptor(
         code=0b00000110,
-        data_type=DataType.B_6
-        | DataType.C_6
-        | DataType.D_6
-        | DataType.I_6,  # Can be signed, unsigned, boolean, or full datetime
+        data_support=DataRules.Supports.BCDI_6,  # Can be signed, unsigned, boolean, or full datetime
     ),
     # 64 bit integer (0x07)
     _DataFieldDescriptor(
         code=0b00000111,
-        data_type=DataType.B_8 | DataType.C_8 | DataType.D_8,  # Can be signed, unsigned, or boolean
+        data_support=DataRules.Supports.BCD_8,  # Can be signed, unsigned, or boolean
     ),
     # Selection for readout (0x08)
     _DataFieldDescriptor(
@@ -183,32 +169,32 @@ _FieldTable: tuple[_AbstractFieldDescriptor, ...] = (
     # 2 digit BCD (0x09)
     _DataFieldDescriptor(
         code=0b00001001,
-        data_type=DataType.A_1,
+        data_support=DataRules.Supports.A_1,
     ),
     # 4 digit BCD (0x0A)
     _DataFieldDescriptor(
         code=0b00001010,
-        data_type=DataType.A_2,
+        data_support=DataRules.Supports.A_2,
     ),
     # 6 digit BCD (0x0B)
     _DataFieldDescriptor(
         code=0b00001011,
-        data_type=DataType.A_3,
+        data_support=DataRules.Supports.A_3,
     ),
     # 8 digit BCD (0x0C)
     _DataFieldDescriptor(
         code=0b00001100,
-        data_type=DataType.A_4,
+        data_support=DataRules.Supports.A_4,
     ),
     # Variable length (0x0D)
     _DataFieldDescriptor(
         code=0b00001101,
-        data_type=DataType.LVAR | DataType.L | DataType.M,  # Can be LVAR, listening window, or duration
+        data_support=DataRules.Supports.LMLVAR,  # Can be LVAR, listening window, or duration
     ),
     # 12 digit BCD (0x0E)
     _DataFieldDescriptor(
         code=0b00001110,
-        data_type=DataType.A_6,
+        data_support=DataRules.Supports.A_6,
     ),
     # ==========================================================================
     # Data Field 0x0F: Special functions (Table 6)
@@ -237,32 +223,6 @@ _FieldTable: tuple[_AbstractFieldDescriptor, ...] = (
     ),
 )
 
-
-_FunctionTable: tuple[_FunctionDescriptor, ...] = (
-    # ==========================================================================
-    # Function codes (Data Field 0x00 - 0x03): Table 7
-    # ==========================================================================
-    # Instantaneous value (0x00)
-    _FunctionDescriptor(
-        code=0b00000000,
-        type=ValueFunction.INSTANTANEOUS,
-    ),
-    # Maximum value (0x01)
-    _FunctionDescriptor(
-        code=0b00010000,
-        type=ValueFunction.MAXIMUM,
-    ),
-    # Minimum value (0x02)
-    _FunctionDescriptor(
-        code=0b00100000,
-        type=ValueFunction.MINIMUM,
-    ),
-    # Value during error state (0x03)
-    _FunctionDescriptor(
-        code=0b00110000,
-        type=ValueFunction.ERROR,
-    ),
-)
 
 # =============================================================================
 # DIF/DIFE Helper functions
@@ -310,9 +270,7 @@ class DIF:
     the correct subclass (DataDIF or SpecialDIF) based on the field_code.
 
     Attributes:
-        field_code: The DIF byte value (0x00-0xFF)
         direction: Communication direction (MASTER_TO_SLAVE or SLAVE_TO_MASTER)
-        chain_position: Position in DIF/DIFE chain (0 for DIF)
         prev_field: Previous field in chain (None for DIF)
         next_field: Next DIFE in chain (None if last_field is True)
         last_field: True if extension bit is 0 (no more DIFE bytes follow)
@@ -320,11 +278,11 @@ class DIF:
     Reference: EN 13757-3:2018, section 6.3, Table 4
     """
 
-    field_code: int
+    _field_code: int
 
     direction: CommunicationDirection
 
-    chain_position: int = 0
+    _chain_position: int = 0
     prev_field: DIF | DIFE | None = None
     next_field: DIFE | None = None
 
@@ -339,7 +297,8 @@ class DIF:
         if isinstance(field_descriptor, _SpecialFieldDescriptor):
             return object.__new__(SpecialDIF)
 
-        raise RuntimeError("DIF field descriptor type not recognized")
+        # Should never reach here - field descriptor must be one of the above types
+        raise AssertionError(f"Field descriptor type not recognized: {type(field_descriptor).__name__}")
 
     def __init__(self, direction: CommunicationDirection, field_code: int) -> None:
         if direction is CommunicationDirection.BIDIRECTIONAL:
@@ -347,7 +306,7 @@ class DIF:
 
         self.direction = direction
 
-        self.field_code = field_code
+        self._field_code = field_code
 
     def create_next_dife(self, field_code: int) -> DIFE:
         """Create the next DIFE in the chain.
@@ -362,6 +321,14 @@ class DIF:
             ValueError: If this field is already marked as last_field
         """
         return DIFE(self.direction, field_code, self)
+
+    def to_bytes(self) -> bytes:
+        """Convert DIF field to bytes representation.
+
+        Returns:
+            Single byte containing the DIF field code
+        """
+        return bytes([self._field_code])
 
     @staticmethod
     async def from_bytes_async(
@@ -415,7 +382,7 @@ class DataDIF(DIF):
     - Extension bit (bit 7)
 
     Attributes:
-        data_type: The data type with length encoding (e.g., DataType.B_4 for 32-bit integer)
+        data_support: Supported data types from DIF encoding (e.g., DataRules.Supports.BCDFK_4 for 32-bit types)
         readout_selection: True if this is a readout selection DIF (0x08)
         value_function: Function code (INSTANTANEOUS, MAXIMUM, MINIMUM, ERROR)
         storage_number: LSB of storage number (0 or 1 from DIF bit 6)
@@ -423,7 +390,7 @@ class DataDIF(DIF):
     Reference: EN 13757-3:2018, Table 4 (page 13)
     """
 
-    data_type: DataType | None
+    data_support: DataRules.Supports
 
     readout_selection: bool
 
@@ -434,14 +401,15 @@ class DataDIF(DIF):
     def __init__(self, direction: CommunicationDirection, field_code: int) -> None:
         super().__init__(direction, field_code)
 
-        field_descriptor = _find_field_descriptor(self.direction, self.field_code)
+        field_descriptor = _find_field_descriptor(self.direction, self._field_code)
 
-        if not isinstance(field_descriptor, _DataFieldDescriptor):
-            raise ValueError("Incorrect field descriptor type for DataDIF")
+        # DIF.__new__ guarantees we only get DataDIF if descriptor is not SpecialFieldDescriptor
+        # So this must be a _DataFieldDescriptor (unless field table has bugs)
+        assert isinstance(field_descriptor, _DataFieldDescriptor), "Incorrect field descriptor type for DataDIF"
 
         self.readout_selection = field_descriptor.readout_selection
 
-        self.data_type = field_descriptor.data_type
+        self.data_support = field_descriptor.data_support
 
         self.storage_number = self._extract_storage_number()
 
@@ -450,18 +418,22 @@ class DataDIF(DIF):
         self.last_field = self._is_last_field()
 
     def _is_last_field(self) -> bool:
-        return self.field_code & DIF_EXTENSION_BIT_MASK == 0
+        return self._field_code & DIF_EXTENSION_BIT_MASK == 0
 
     def _extract_storage_number(self) -> int:
-        return (self.field_code & DIF_STORAGE_NUMBER_BIT_MASK) >> DIF_STORAGE_NUMBER_BIT_SHIFT
+        return (self._field_code & DIF_STORAGE_NUMBER_BIT_MASK) >> DIF_STORAGE_NUMBER_BIT_SHIFT
 
     def _extract_function(self) -> ValueFunction:
-        function_code = self.field_code & DIF_FUNCTION_BIT_MASK
-        for function_descriptor in _FunctionTable:
-            if function_code == function_descriptor.code:
-                return function_descriptor.type
-        else:
-            raise RuntimeError(f"Function code for DataDIF 0x{self.field_code:02X} not found in function table")
+        function_code = self._field_code & DIF_FUNCTION_BIT_MASK
+
+        if function_code == DIF_FUNCTION_CODE_INSTANTANEOUS:
+            return ValueFunction.INSTANTANEOUS
+        if function_code == DIF_FUNCTION_CODE_MAXIMUM:
+            return ValueFunction.MAXIMUM
+        if function_code == DIF_FUNCTION_CODE_MINIMUM:
+            return ValueFunction.MINIMUM
+        else:  # function_code == DIF_FUNCTION_CODE_ERROR
+            return ValueFunction.ERROR
 
 
 class SpecialDIF(DIF):
@@ -484,10 +456,10 @@ class SpecialDIF(DIF):
     def __init__(self, direction: CommunicationDirection, field_code: int) -> None:
         super().__init__(direction, field_code)
 
-        field_descriptor = _find_field_descriptor(self.direction, self.field_code)
+        field_descriptor = _find_field_descriptor(self.direction, self._field_code)
 
-        if not isinstance(field_descriptor, _SpecialFieldDescriptor):
-            raise ValueError("Incorrect field descriptor type for SpecialDIF")
+        # DIF.__new__ guarantees we only get SpecialDIF if descriptor is _SpecialFieldDescriptor
+        assert isinstance(field_descriptor, _SpecialFieldDescriptor), "Incorrect field descriptor type for SpecialDIF"
 
         self.special_function = field_descriptor.function
 
@@ -524,12 +496,12 @@ class DIFE(DIF):
         self.prev_field = prev_field
         self.prev_field.next_field = self
 
-        self.chain_position = self.prev_field.chain_position + 1
+        self._chain_position = self.prev_field._chain_position + 1
 
         self.last_field = self._is_last_field()
 
     def _is_last_field(self) -> bool:
-        return self.field_code & DIFE_EXTENSION_BIT_MASK == 0
+        return self._field_code & DIFE_EXTENSION_BIT_MASK == 0
 
 
 class DataDIFE(DIFE):
@@ -559,7 +531,7 @@ class DataDIFE(DIFE):
     tariff: int
 
     def __init__(self, direction: CommunicationDirection, field_code: int, prev_field: DIF | DIFE) -> None:
-        if prev_field.chain_position >= DIFE_MAXIMUM_CHAIN_LENGTH:
+        if prev_field._chain_position >= DIFE_MAXIMUM_CHAIN_LENGTH:
             raise ValueError("Exceeded maximum DIFE chain length")
 
         super().__init__(direction, field_code, prev_field)
@@ -570,26 +542,27 @@ class DataDIFE(DIFE):
 
         self.tariff = self._extract_tariff()
 
-        if self.last_field and self.storage_number == 0 and self.subunit == 0 and self.tariff == 0:
-            raise ValueError(
-                "DataDIFE may not have storage number, subunit, tariff all zero and be the last field at the same time"
-            )
+        # DIFE.__new__ guarantees field_code != 0x00 for DataDIFE (0x00 creates FinalDIFE)
+        # So if last_field is True (extension bit = 0), at least one of bits 0-6 must be set
+        assert not self.last_field or self.storage_number > 0 or self.subunit > 0 or self.tariff > 0, (
+            "DataDIFE cannot have all-zero data bits when last_field is True (would be FinalDIFE)"
+        )
 
     def _extract_storage_number(self) -> int:
-        raw_bits = (self.field_code & DIFE_STORAGE_NUMBER_BIT_MASK) >> DIFE_STORAGE_NUMBER_BIT_SHIFT
-        must_shift = DIFE_STORAGE_NUMBER_BIT_LENGTH * (self.chain_position - 1) + DIF_STORAGE_NUMBER_BIT_LENGTH
+        raw_bits = (self._field_code & DIFE_STORAGE_NUMBER_BIT_MASK) >> DIFE_STORAGE_NUMBER_BIT_SHIFT
+        must_shift = DIFE_STORAGE_NUMBER_BIT_LENGTH * (self._chain_position - 1) + DIF_STORAGE_NUMBER_BIT_LENGTH
 
         return raw_bits << must_shift
 
     def _extract_subunit(self) -> int:
-        raw_bit = (self.field_code & DIFE_SUBUNIT_BIT_MASK) >> DIFE_SUBUNIT_BIT_SHIFT
-        must_shift = DIFE_SUBUNIT_BIT_LENGTH * (self.chain_position - 1)
+        raw_bit = (self._field_code & DIFE_SUBUNIT_BIT_MASK) >> DIFE_SUBUNIT_BIT_SHIFT
+        must_shift = DIFE_SUBUNIT_BIT_LENGTH * (self._chain_position - 1)
 
         return raw_bit << must_shift
 
     def _extract_tariff(self) -> int:
-        raw_bits = (self.field_code & DIFE_TARIFF_BIT_MASK) >> DIFE_TARIFF_BIT_SHIFT
-        must_shift = DIFE_TARIFF_BIT_LENGTH * (self.chain_position - 1)
+        raw_bits = (self._field_code & DIFE_TARIFF_BIT_MASK) >> DIFE_TARIFF_BIT_SHIFT
+        must_shift = DIFE_TARIFF_BIT_LENGTH * (self._chain_position - 1)
 
         return raw_bits << must_shift
 
@@ -619,10 +592,13 @@ class FinalDIFE(DIFE):
     """
 
     def __init__(self, direction: CommunicationDirection, field_code: int, prev_field: DIF | DIFE) -> None:
-        if prev_field.chain_position > DIFE_MAXIMUM_CHAIN_LENGTH:
+        if prev_field._chain_position > DIFE_MAXIMUM_CHAIN_LENGTH:
             raise ValueError("Exceeded maximum DIFE + final DIFE chain length")
 
         super().__init__(direction, field_code, prev_field)
 
-        if field_code != DIFE_FINAL_CODE:
-            raise ValueError("FinalDIFE must match final DIFE code")
+        # DIFE.__new__ guarantees field_code == DIFE_FINAL_CODE for FinalDIFE
+        assert field_code == DIFE_FINAL_CODE, "FinalDIFE must have field_code == DIFE_FINAL_CODE (0x00)"
+
+        # DIFE.__init__ guarantees last_field is True for FinalDIFE
+        assert self.last_field, "FinalDIFE must be the last field in the DIF/DIFE chain"

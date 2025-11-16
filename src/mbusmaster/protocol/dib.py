@@ -41,6 +41,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from .common import CommunicationDirection
+from .data import DataRules
 from .dif import (
     DIF,
     DIFE,
@@ -97,6 +98,8 @@ class DIB:
     Reference: EN 13757-3:2018, section 6.3
     """
 
+    _field_chain: tuple[DIF, *tuple[DIFE, ...]]
+
     direction: CommunicationDirection
 
     def __new__(cls, direction: CommunicationDirection, dif: DIF, *dife: DIFE) -> DIB:
@@ -115,7 +118,8 @@ class DIB:
             if _SpecialFieldFunction.GLOBAL_READOUT in dif.special_function:
                 return object.__new__(GlobalReadoutDIB)
 
-        raise RuntimeError("DIF type not recognized")
+        # Should never reach here - DIF factory only returns DataDIF or SpecialDIF
+        raise AssertionError(f"DIF type not recognized: {type(dif).__name__}")
 
     def __init__(self, direction: CommunicationDirection, dif: DIF, *dife: DIFE) -> None:
         if direction is CommunicationDirection.BIDIRECTIONAL:
@@ -123,13 +127,29 @@ class DIB:
 
         self.direction = direction
 
+        # DIB.__new__ guarantees dif is DIF for DIB subclasses
+        assert isinstance(dif, DIF), "dif must be instance of DIF"
+
         if dif.direction is not self.direction:
             raise ValueError("DIF/DIFE communication direction does not match DIB communication direction")
 
-        field_chain: tuple[DIF, *tuple[DIFE, ...]] = (dif, *dife)
+        self._field_chain = (dif, *dife)
 
-        if len(field_chain) != field_chain[-1].chain_position + 1:
-            raise ValueError("DIF/DIFE chain length mismatch")
+    def to_bytes(self) -> bytes:
+        """Convert DIB to bytes representation.
+
+        Serializes the complete DIF/DIFE chain by calling to_bytes() on each
+        field in the chain and concatenating the results.
+
+        Returns:
+            Bytes containing the complete DIB (DIF + DIFEs)
+        """
+        byte_array = bytearray()
+
+        for field in self._field_chain:
+            byte_array.extend(field.to_bytes())
+
+        return bytes(byte_array)
 
     @staticmethod
     async def from_bytes_async(
@@ -199,6 +219,7 @@ class DataDIB(DIB):
         - Total: up to 10 bits from 10 DIFEs
 
     Attributes:
+        data_support: Supported data types from DIF encoding (e.g., DataRules.Supports.BCDFK_4)
         value_function: Function type (INSTANTANEOUS, MAXIMUM, MINIMUM, ERROR)
         register_number: True if FinalDIFE present (storage number is register number)
         storage_number: Accumulated storage number or register number (0-125 if register_number=True)
@@ -218,6 +239,8 @@ class DataDIB(DIB):
         - Table 8 (page 14): DIFE encoding
     """
 
+    data_support: DataRules.Supports
+
     value_function: ValueFunction
 
     register_number: bool = False
@@ -228,56 +251,67 @@ class DataDIB(DIB):
 
     tariff: int = 0
 
-    def __init__(self, direction: CommunicationDirection, dif: DIF, *dife: DIFE) -> None:
+    def __init__(self, direction: CommunicationDirection, dif: DataDIF, *dife: DataDIFE) -> None:
         super().__init__(direction, dif, *dife)
 
-        field_chain: tuple[DIF, *tuple[DIFE, ...]] = (dif, *dife)
+        # DIB.__new__ guarantees dif is DataDIF for DataDIB subclasses
+        assert isinstance(dif, DataDIF), "DataDIB must have DataDIF"
 
-        current_field: DIF | DIFE = field_chain[0]
+        self.data_support = dif.data_support
+
+        self.value_function = dif.value_function
+
+        self.storage_number += dif.storage_number
+
+        test_field: DIF | DIFE | None = dif
+        test_position = 0
 
         while True:
-            if (
-                current_field.chain_position < 0
-                or current_field.chain_position >= len(field_chain)
-                or field_chain[current_field.chain_position] is not current_field
-            ):
+            if self._field_chain[test_position] is not test_field:
                 raise ValueError("DIF/DIFE chain is broken")
 
-            if isinstance(current_field, DataDIF):
-                self.value_function = current_field.value_function
+            if test_field.next_field is None:
+                if self._field_chain[test_position] is not self._field_chain[-1] or not test_field.last_field:
+                    raise ValueError("DIF/DIFE chain is incomplete")
 
-                self.storage_number += current_field.storage_number
-            elif isinstance(current_field, DataDIFE):
-                self.storage_number += current_field.storage_number
+                break
 
-                self.subunit += current_field.subunit
+            # DIFE.__init__ guarantees that last field cannot have next_field
+            assert not test_field.last_field, "DIF/DIFE chain has extra fields after last_field"
 
-                self.tariff += current_field.tariff
-            elif isinstance(current_field, FinalDIFE):
-                if current_field.next_field is not None:
-                    raise ValueError("Final DIFE cannot have a next field")
+            test_field = test_field.next_field
+            test_position += 1
 
-                if len(field_chain) - 1 > DIB_MAXIMUM_CHAIN_LENGTH:
-                    raise ValueError("DIF/DIFE chain exceeds maximum length with final DIFE")
+            if isinstance(test_field, DataDIFE):
+                # Chain with DataDIFE <= 11 (guaranteed by DataDIFE.__init__ checking position)
+                assert test_position + 1 <= DIB_MAXIMUM_CHAIN_LENGTH, (
+                    "DIF/DIFE chain exceeds maximum length with DataDIFE"
+                )
+
+                self.storage_number += test_field.storage_number
+
+                self.subunit += test_field.subunit
+
+                self.tariff += test_field.tariff
+
+                continue
+            elif isinstance(test_field, FinalDIFE):
+                # Chain with FinalDIFE <= 12 (guaranteed by FinalDIFE.__init__ checking position)
+                assert test_position + 1 <= DIB_MAXIMUM_CHAIN_LENGTH + 1, (
+                    "DIF/DIFE chain exceeds maximum length with final DIFE"
+                )
+
+                # FinalDIFE.__init__ guarantees last_field is True for FinalDIFE
+                assert test_field.last_field, "FinalDIFE must be the last field in the DIF/DIFE chain"
 
                 if self.storage_number > DIB_MAXIMUM_REGISTER_NUMBER:
                     raise ValueError("Register number (storage number) exceeds maximum allowed value")
 
                 self.register_number = True
 
-                break
-            else:
-                raise ValueError("Non-data DIF/DIFE found in DIF/DIFE chain")
+                continue
 
-            if current_field.next_field is None:
-                if len(field_chain) > DIB_MAXIMUM_CHAIN_LENGTH:
-                    raise ValueError("DIF/DIFE chain exceeds maximum length without final DIFE")
-                break
-
-            current_field = current_field.next_field
-
-        if not current_field.last_field:
-            raise ValueError("DIF/DIFE chain is incomplete")
+            raise AssertionError("Non-data DIF/DIFE found in DIF/DIFE chain")
 
 
 class ReadoutSelectionDIB(DataDIB):
@@ -303,8 +337,8 @@ class ReadoutSelectionDIB(DataDIB):
     def __init__(self, direction: CommunicationDirection, dif: DataDIF, *dife: DataDIFE) -> None:
         super().__init__(direction, dif, *dife)
 
-        if not dif.readout_selection:
-            raise ValueError("The DIF of ReadoutSelectionDIB must have readout_selection set to True")
+        # DIB.__new__ guarantees readout_selection is True for ReadoutSelectionDIB
+        assert dif.readout_selection, "ReadoutSelectionDIB must have readout_selection=True"
 
 
 class SpecialDIB(DIB):
@@ -335,14 +369,14 @@ class SpecialDIB(DIB):
         - Table 6 (page 14): Special function codes
     """
 
-    def __init__(self, direction: CommunicationDirection, dif: DIF, *dife: DIFE) -> None:
+    def __init__(self, direction: CommunicationDirection, dif: SpecialDIF, *dife: DIFE) -> None:
         super().__init__(direction, dif, *dife)
 
-        if not isinstance(dif, SpecialDIF):
-            raise ValueError("The DIF of SpecialDIB must be SpecialDIF")
+        # DIB.__new__ guarantees dif is SpecialDIF for SpecialDIB subclasses
+        assert isinstance(dif, SpecialDIF), "SpecialDIB must have SpecialDIF"
 
-        if dife:
-            raise ValueError("SpecialDIB cannot have DIFE fields")
+        # SpecialDIF.last_field is always True, so DIFE.__init__ prevents extension
+        assert not dife, "SpecialDIB cannot have DIFE fields"
 
 
 class ManufacturerDIB(SpecialDIB):
@@ -377,11 +411,12 @@ class ManufacturerDIB(SpecialDIB):
     def __init__(self, direction: CommunicationDirection, dif: SpecialDIF, *dife: DIFE) -> None:
         super().__init__(direction, dif, *dife)
 
-        if (
+        # DIB.__new__ uses 'in' check, but special_function values come from field tables
+        # Field tables only contain valid combinations: 0x0F or 0x1F (with MORE_RECORDS_FOLLOW)
+        assert (
             dif.special_function & ~_SpecialFieldFunction.MORE_RECORDS_FOLLOW
-            is not _SpecialFieldFunction.MANUFACTURER_DATA_HEADER
-        ):
-            raise ValueError("Invalid special function for ManufacturerDIB")
+            is _SpecialFieldFunction.MANUFACTURER_DATA_HEADER
+        ), "ManufacturerDIB must have MANUFACTURER_DATA_HEADER (optionally with MORE_RECORDS_FOLLOW)"
 
         self.more_records_follow = _SpecialFieldFunction.MORE_RECORDS_FOLLOW in dif.special_function
 
@@ -413,8 +448,8 @@ class IdleFillerDIB(SpecialDIB):
     def __init__(self, direction: CommunicationDirection, dif: SpecialDIF, *dife: DIFE) -> None:
         super().__init__(direction, dif, *dife)
 
-        if dif.special_function is not _SpecialFieldFunction.IDLE_FILLER:
-            raise ValueError("Invalid special function for IdleFillerDIB")
+        # DIB.__new__ uses 'in' check, but field tables only contain 0x2F for IDLE_FILLER
+        assert dif.special_function is _SpecialFieldFunction.IDLE_FILLER, "IdleFillerDIB must have IDLE_FILLER"
 
 
 class GlobalReadoutDIB(SpecialDIB):
@@ -443,5 +478,5 @@ class GlobalReadoutDIB(SpecialDIB):
     def __init__(self, direction: CommunicationDirection, dif: SpecialDIF, *dife: DIFE) -> None:
         super().__init__(direction, dif, *dife)
 
-        if dif.special_function is not _SpecialFieldFunction.GLOBAL_READOUT:
-            raise ValueError("Invalid special function for GlobalReadoutDIB")
+        # DIB.__new__ uses 'in' check, but field tables only contain 0x7F for GLOBAL_READOUT
+        assert dif.special_function is _SpecialFieldFunction.GLOBAL_READOUT, "GlobalReadoutDIB must have GLOBAL_READOUT"

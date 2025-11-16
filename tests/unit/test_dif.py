@@ -3,7 +3,7 @@
 import pytest
 
 from src.mbusmaster.protocol import CommunicationDirection
-from src.mbusmaster.protocol.data import DataType
+from src.mbusmaster.protocol.data import DataRules
 from src.mbusmaster.protocol.dif import (
     DIF,
     DIFE,
@@ -56,6 +56,12 @@ TEST_INVALID_DIFE_AS_LAST = 0x8F  # Used to test exceeding chain length
 
 # Chain length limits
 TEST_DIFE_MAXIMUM_CHAIN_LENGTH = 10  # Maximum number of chained DIFE bytes
+
+# Expected bytes for to_bytes() tests
+TEST_DIF_32BIT_INST_BYTES = bytes([TEST_DIF_32BIT_INST])
+TEST_SPECIAL_DIF_MANUFACTURER_BYTES = bytes([TEST_SPECIAL_DIF_MANUFACTURER])
+TEST_DIFE_STORAGE_1_BYTES = bytes([TEST_DIFE_STORAGE_1])
+TEST_FINAL_DIFE_BYTES = bytes([TEST_FINAL_DIFE])
 
 # =============================================================================
 # Helper Function Tests
@@ -118,7 +124,7 @@ class TestDIF:
     def test_chain_position_is_zero(self) -> None:
         """Test that DIF has chain_position=0."""
         dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST)
-        assert dif.chain_position == 0
+        assert dif._chain_position == 0
 
     def test_prev_field_is_none(self) -> None:
         """Test that DIF has no prev_field."""
@@ -131,16 +137,31 @@ class TestDIF:
         dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)  # With extension bit
         dife1 = dif.create_next_dife(TEST_DIFE_STORAGE_1_EXT)
         assert isinstance(dife1, DataDIFE)
-        assert dife1.chain_position == 1
+        assert dife1._chain_position == 1
         assert dife1.prev_field is dif
         assert dif.next_field is dife1
 
         # Test creating DIFE from DIFE
         dife2 = dife1.create_next_dife(TEST_DIFE_STORAGE_1)
         assert isinstance(dife2, DataDIFE)
-        assert dife2.chain_position == 2
+        assert dife2._chain_position == 2
         assert dife2.prev_field is dife1
         assert dife1.next_field is dife2
+
+    @pytest.mark.parametrize(
+        ("dif_code", "expected_bytes"),
+        [
+            (TEST_DIF_32BIT_INST, TEST_DIF_32BIT_INST_BYTES),
+            (TEST_SPECIAL_DIF_MANUFACTURER, TEST_SPECIAL_DIF_MANUFACTURER_BYTES),
+        ],
+        ids=["data_dif", "special_dif"],
+    )
+    def test_to_bytes_returns_single_byte(self, dif_code: int, expected_bytes: bytes) -> None:
+        """Test that to_bytes() returns correct single byte for both DataDIF and SpecialDIF."""
+        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, dif_code)
+        result = dif.to_bytes()
+        assert result == expected_bytes
+        assert len(result) == 1
 
 
 # =============================================================================
@@ -152,21 +173,21 @@ class TestDataDIF:
     """Tests for DataDIF class."""
 
     @pytest.mark.parametrize(
-        ("dif_code", "expected_data_type"),
+        ("dif_code", "expected_data_support"),
         [
-            (TEST_DIF_16BIT_INST, DataType.B_2 | DataType.C_2 | DataType.D_2 | DataType.G_2),
-            (TEST_DIF_32BIT_INST, DataType.B_4 | DataType.C_4 | DataType.D_4 | DataType.F_4 | DataType.K_4),
-            (TEST_DIF_48BIT_INST_STORAGE1, DataType.B_6 | DataType.C_6 | DataType.D_6 | DataType.I_6),
-            (TEST_DIF_BCD8_INST, DataType.A_4),
-            (TEST_DIF_READOUT_SEL, None),  # Readout selection has no data type
+            (TEST_DIF_16BIT_INST, DataRules.Supports.BCDG_2),
+            (TEST_DIF_32BIT_INST, DataRules.Supports.BCDFK_4),
+            (TEST_DIF_48BIT_INST_STORAGE1, DataRules.Supports.BCDI_6),
+            (TEST_DIF_BCD8_INST, DataRules.Supports.A_4),
+            (TEST_DIF_READOUT_SEL, DataRules.Supports.NONE),  # Readout selection has no data support
         ],
         ids=["16bit_integer", "32bit_integer", "48bit_integer", "8digit_bcd", "readout_selection_none"],
     )
-    def test_data_type_extracted(self, dif_code: int, expected_data_type: DataType | None) -> None:
-        """Test that data_type matches expected type and conversions."""
+    def test_data_support_extracted(self, dif_code: int, expected_data_support: DataRules.Supports) -> None:
+        """Test that data_support matches expected support types."""
         dif = DIF(CommunicationDirection.MASTER_TO_SLAVE, dif_code)
         assert isinstance(dif, DataDIF)
-        assert expected_data_type is dif.data_type
+        assert expected_data_support is dif.data_support
 
     @pytest.mark.parametrize(
         ("dif_code", "expected_function"),
@@ -314,8 +335,8 @@ class TestDIFE:
             direction=CommunicationDirection.SLAVE_TO_MASTER,
             prev_field=dife1,
         )
-        assert dife1.chain_position == 1
-        assert dife2.chain_position == 2
+        assert dife1._chain_position == 1
+        assert dife2._chain_position == 2
 
     def test_cannot_extend_last_field(self) -> None:
         """Test that extending a last_field raises ValueError."""
@@ -360,6 +381,22 @@ class TestDIFE:
                 direction=CommunicationDirection.SLAVE_TO_MASTER,
                 prev_field=dife1,  # Already has next_field set
             )
+
+    @pytest.mark.parametrize(
+        ("dife_code", "expected_bytes"),
+        [
+            (TEST_DIFE_STORAGE_1, TEST_DIFE_STORAGE_1_BYTES),
+            (TEST_FINAL_DIFE, TEST_FINAL_DIFE_BYTES),
+        ],
+        ids=["data_dife", "final_dife"],
+    )
+    def test_to_bytes_returns_single_byte(self, dife_code: int, expected_bytes: bytes) -> None:
+        """Test that to_bytes() returns correct single byte for both DataDIFE and FinalDIFE."""
+        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)
+        dife = DIFE(CommunicationDirection.SLAVE_TO_MASTER, dife_code, dif)
+        result = dife.to_bytes()
+        assert result == expected_bytes
+        assert len(result) == 1
 
 
 # =============================================================================
@@ -492,7 +529,7 @@ class TestDataDIFIsolatedMethods:
     def test_is_last_field_isolated(self, field_code: int, expected_result: bool) -> None:
         """Test _is_last_field() method directly without __init__."""
         dif = object.__new__(DataDIF)
-        dif.field_code = field_code
+        dif._field_code = field_code
 
         result = dif._is_last_field()
         assert result is expected_result
@@ -508,7 +545,7 @@ class TestDataDIFIsolatedMethods:
     def test_extract_storage_number_isolated(self, field_code: int, expected_storage: int) -> None:
         """Test _extract_storage_number() method directly without __init__."""
         dif = object.__new__(DataDIF)
-        dif.field_code = field_code
+        dif._field_code = field_code
 
         result = dif._extract_storage_number()
         assert result == expected_storage
@@ -526,7 +563,7 @@ class TestDataDIFIsolatedMethods:
     def test_extract_function_isolated(self, field_code: int, expected_function: ValueFunction) -> None:
         """Test _extract_function() method directly without __init__."""
         dif = object.__new__(DataDIF)
-        dif.field_code = field_code
+        dif._field_code = field_code
 
         result = dif._extract_function()
         assert result == expected_function
@@ -546,7 +583,7 @@ class TestDataDIFEIsolatedMethods:
     def test_is_last_field_isolated(self, field_code: int, expected_result: bool) -> None:
         """Test DIFE _is_last_field() method directly without __init__."""
         dife = object.__new__(DataDIFE)
-        dife.field_code = field_code
+        dife._field_code = field_code
 
         result = dife._is_last_field()
         assert result is expected_result
@@ -563,8 +600,8 @@ class TestDataDIFEIsolatedMethods:
     def test_extract_storage_number_isolated(self, chain_position: int, expected_storage: int) -> None:
         """Test _extract_storage_number() at different positions without __init__."""
         dife = object.__new__(DataDIFE)
-        dife.field_code = TEST_DIFE_STORAGE_FULL  # All storage bits set
-        dife.chain_position = chain_position
+        dife._field_code = TEST_DIFE_STORAGE_FULL  # All storage bits set
+        dife._chain_position = chain_position
 
         result = dife._extract_storage_number()
         assert result == expected_storage
@@ -581,8 +618,8 @@ class TestDataDIFEIsolatedMethods:
     def test_extract_tariff_isolated(self, chain_position: int, expected_tariff: int) -> None:
         """Test _extract_tariff() at different positions without __init__."""
         dife = object.__new__(DataDIFE)
-        dife.field_code = TEST_DIFE_TARIFF_FULL  # All tariff bits set
-        dife.chain_position = chain_position
+        dife._field_code = TEST_DIFE_TARIFF_FULL  # All tariff bits set
+        dife._chain_position = chain_position
 
         result = dife._extract_tariff()
         assert result == expected_tariff
@@ -599,8 +636,8 @@ class TestDataDIFEIsolatedMethods:
     def test_extract_subunit_isolated(self, chain_position: int, expected_subunit: int) -> None:
         """Test _extract_subunit() at different positions without __init__."""
         dife = object.__new__(DataDIFE)
-        dife.field_code = TEST_DIFE_SUBUNIT_FULL  # Subunit bit set
-        dife.chain_position = chain_position
+        dife._field_code = TEST_DIFE_SUBUNIT_FULL  # Subunit bit set
+        dife._chain_position = chain_position
 
         result = dife._extract_subunit()
         assert result == expected_subunit
@@ -670,7 +707,7 @@ class TestDIFFromBytesAsync:
         # Verify types and chain positions
         for i, (field, expected_type) in enumerate(zip(result, expected_types, strict=True)):
             assert isinstance(field, expected_type)
-            assert field.chain_position == i
+            assert field._chain_position == i
 
         # Verify last field property
         assert result[-1].last_field is True
@@ -738,7 +775,7 @@ class TestFinalDIFE:
             prev_field=dif,
         )
         assert isinstance(final, FinalDIFE)
-        assert final.field_code == TEST_FINAL_DIFE
+        assert final._field_code == TEST_FINAL_DIFE
 
     def test_must_be_last_field(self) -> None:
         """Test that FinalDIFE is always marked as last_field."""
@@ -770,17 +807,7 @@ class TestFinalDIFE:
             prev_field=current,
         )
         assert isinstance(final, FinalDIFE)
-        assert final.chain_position == TEST_DIFE_MAXIMUM_CHAIN_LENGTH + 1
-
-    def test_incorrect_code_raises(self) -> None:
-        """Test that FinalDIFE with non-zero code raises ValueError."""
-        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)
-        # Manually try to create FinalDIFE with wrong code
-        # Factory won't let us, so test the validation in __init__
-        # We need to bypass factory for this test
-        final = object.__new__(FinalDIFE)
-        with pytest.raises(ValueError, match="must match final DIFE code"):
-            FinalDIFE.__init__(final, CommunicationDirection.SLAVE_TO_MASTER, TEST_DIFE_STORAGE_1, dif)
+        assert final._chain_position == TEST_DIFE_MAXIMUM_CHAIN_LENGTH + 1
 
     def test_final_dife_after_position_11_raises(self) -> None:
         """Test that FinalDIFE after position 11 raises ValueError."""
@@ -809,29 +836,4 @@ class TestFinalDIFE:
                 field_code=TEST_FINAL_DIFE,
                 direction=CommunicationDirection.SLAVE_TO_MASTER,
                 prev_field=final,
-            )
-
-
-# =============================================================================
-# Error Scenario Tests
-# =============================================================================
-
-
-class TestErrorScenarios:
-    """Tests for error scenarios and edge cases."""
-
-    def test_data_dife_all_zeros_as_last_field_validation(self) -> None:
-        """Test DataDIFE validation for all-zeros as last field (bypass factory)."""
-        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)
-
-        # Bypass factory to force creation of DataDIFE with all zeros
-        data_dife = object.__new__(DataDIFE)
-        with pytest.raises(ValueError, match="DataDIFE may not have storage number, subunit, tariff all zero"):
-            # Call __init__ directly with field_code that results in all zeros
-            # This simulates what would happen if factory allowed DataDIFE with 0x00
-            DataDIFE.__init__(
-                data_dife,
-                CommunicationDirection.SLAVE_TO_MASTER,
-                TEST_FINAL_DIFE,  # 0x00 - all zeros, no extension bit
-                dif,
             )
