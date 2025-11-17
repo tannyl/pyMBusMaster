@@ -118,8 +118,7 @@ class DIB:
             if _SpecialFieldFunction.GLOBAL_READOUT in dif.special_function:
                 return object.__new__(GlobalReadoutDIB)
 
-        # Should never reach here - DIF factory only returns DataDIF or SpecialDIF
-        raise AssertionError(f"DIF type not recognized: {type(dif).__name__}")
+        raise ValueError(f"Expected DIF instance, got {type(dif).__name__}")
 
     def __init__(self, direction: CommunicationDirection, dif: DIF, *dife: DIFE) -> None:
         if direction is CommunicationDirection.BIDIRECTIONAL:

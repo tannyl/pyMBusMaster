@@ -89,6 +89,16 @@ class TestDIB:
         with pytest.raises(ValueError, match="direction does not match"):
             DIB(CommunicationDirection.MASTER_TO_SLAVE, dif)
 
+    def test_dife_instead_of_dif_raises(self) -> None:
+        """Test that passing DIFE instead of DIF raises ValueError."""
+        # Build a proper DIF/DIFE chain
+        dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)
+        dife = dif.create_next_dife(TEST_DIFE_STORAGE_1)
+
+        # Try to create DIB with DIFE as first argument (wrong!)
+        with pytest.raises(ValueError, match="Expected DIF instance, got DataDIFE"):
+            DIB(CommunicationDirection.SLAVE_TO_MASTER, dife)  # type: ignore
+
     def test_chain_length_mismatch_raises(self) -> None:
         """Test that chain length mismatch raises ValueError."""
         dif = DIF(CommunicationDirection.SLAVE_TO_MASTER, TEST_DIF_32BIT_INST_EXT)
