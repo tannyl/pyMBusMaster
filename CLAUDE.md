@@ -14,6 +14,16 @@
    - Use `pyserial-asyncio-fast` (not the original pyserial-asyncio)
    - This is the Home Assistant maintained fork
 
+4. **Never Skip Failing Tasks**
+   - If a task fails unexpectedly, DO NOT silently remove or skip it
+   - If the failure is NOT due to your new code, investigate the root cause
+   - Report back to the user explaining:
+     - What failed
+     - Why it failed
+     - Whether it's a bug in existing code
+   - Let the user decide how to proceed
+   - Better to ask than to hide problems
+
 ## Project Context
 
 - **Purpose**: Modern async Python library for M-Bus (Meter-Bus) communication
